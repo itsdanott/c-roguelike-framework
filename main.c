@@ -1,6 +1,8 @@
+#include "tiny_ttf.h"
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 /*
  * C ROGUELIKE FRAMEWORK *******************************************************
@@ -9,7 +11,7 @@
  *
  * Ideally the only dependency is SDL.
  * So instead of the typical route via stb, miniaudio and so on we want to do
- * everything with SDL. (we'll probably need stb_image and stb_truetype)
+ * everything with the SDL libs (SDL, SDL_ttf, SDL_mixer and SDL_image).
  *
  * Planned target platforms:
  *   -Windows
@@ -51,6 +53,7 @@ typedef struct
 {
     SDL_Window* sdl;
     int width, height;
+    bool fullscreen;
 } Window;
 
 typedef struct
@@ -59,16 +62,20 @@ typedef struct
     Game game;
     Mouse mouse;
     SDL_Renderer* renderer;
+    TTF_Font* font;
+    TTF_TextEngine* text_engine;
+
     Uint64 last_tick;
 } App;
 
 static App default_app()
 {
-    return (App) {
+    return (App){
         .window = (Window){
             .width = SDL_WINDOW_WIDTH,
             .height = SDL_WINDOW_HEIGHT,
         },
+        .font = NULL,
     };
 }
 
@@ -84,28 +91,55 @@ static void app_draw(const App* app)
     SDL_RenderClear(app->renderer);
 
 
-    SDL_SetRenderDrawColor(app->renderer, 128,0,0,SDL_ALPHA_OPAQUE);
-    SDL_RenderLine(app->renderer,
-        0,0,
+    SDL_SetRenderDrawColor(app->renderer, 128, 0, 0,SDL_ALPHA_OPAQUE);
+    SDL_RenderLine(
+        app->renderer,
+        0, 0,
         (float)app->window.width, (float)app->window.height
     );
 
-    SDL_RenderDebugText(app->renderer,
-    app->game.player.pos_x,// (float)SDL_WINDOW_WIDTH * 0.5f,
-    app->game.player.pos_y,//(float)SDL_WINDOW_HEIGHT * 0.5f,
-        "HELLO ROGUE!");
+    SDL_RenderDebugText(
+        app->renderer,
+        app->game.player.pos_x,
+        app->game.player.pos_y,
+        "HELLO ROGUE!"
+    );
 
     SDL_FRect rect = (SDL_FRect){
-        .w = (float)app->window.width   * 0.25f,
-        .h = (float)app->window.height  * 0.25f,
+        .w = (float)app->window.width * 0.25f,
+        .h = (float)app->window.height * 0.25f,
     };
-    rect.x = (float)app->window.width   * 0.5f - rect.w * 0.5f;
-    rect.y = (float)app->window.height  * 0.5f - rect.h * 0.5f;
+    rect.x = (float)app->window.width * 0.5f - rect.w * 0.5f;
+    rect.y = (float)app->window.height * 0.5f - rect.h * 0.5f;
 
     SDL_RenderFillRect(app->renderer, &rect);
 
+
+    //TEXT Test
+    TTF_Text* txt = TTF_CreateText(app->text_engine, app->font,
+                                   "Hello Rogue!", 0);
+    TTF_SetTextColor(txt, 128, 128, 0, SDL_ALPHA_OPAQUE);
+    TTF_DrawRendererText(txt, app->game.player.pos_x, rect.y);
+    TTF_DestroyText(txt);
+
     SDL_RenderPresent(app->renderer);
 }
+
+static void process_event_key_down(App* app, const SDL_KeyboardEvent event)
+{
+    switch (event.key)
+    {
+    case SDLK_SPACE:
+        SDL_GetWindowFullscreenMode(app->window.sdl);
+        SDL_SetWindowFullscreen(app->window.sdl, !app->window.fullscreen);
+        return;
+    default: return;
+    }
+}
+
+/*******************************************************************************
+ * SDL callbacks
+ ******************************************************************************/
 
 /*
  *  This will be called once before anything else. argc/argv work like they
@@ -132,31 +166,71 @@ static void app_draw(const App* app)
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
 {
     if (!SDL_SetAppMetadata(
-        APP_TITLE,
-        APP_VERSION,
-        APP_IDENTIFIER)
+            APP_TITLE,
+            APP_VERSION,
+            APP_IDENTIFIER)
     )
+    {
+        SDL_Log("Failed to set SDL AppMetadata: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
+    }
 
     if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO))
+    {
+        SDL_Log("Failed to initialize SDL: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
+    }
 
     App* app = SDL_malloc(sizeof(App));
     if (app == NULL)
+    {
+        SDL_Log("Failed to set allocate APP memory: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
+    }
 
     *app = default_app();
     *appstate = app;
 
     if (!SDL_CreateWindowAndRenderer(
-        APP_TITLE,
-        SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
-        SDL_WINDOW_BORDERLESS,
-        &app->window.sdl, &app->renderer)
-    ) return SDL_APP_FAILURE;
+            APP_TITLE,
+            SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
+            SDL_WINDOW_BORDERLESS,
+            &app->window.sdl, &app->renderer)
+    )
+    {
+        SDL_Log("Failed to CreateWindowAndRenderer: %s\n", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
 
     if (!SDL_SetRenderVSync(app->renderer, 1))
+    {
+        SDL_Log("Failed to SetRenderVSync = 1: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
+    }
+
+    //FONT
+    if (!TTF_Init())
+    {
+        SDL_Log("Failed to initialize SDL_ttf: %s\n", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    app->font = TTF_OpenFontIO(
+        SDL_IOFromConstMem(tiny_ttf, tiny_ttf_len),
+        true, 18.0f);
+    if (!app->font)
+    {
+        SDL_Log("Failed to open Font: %s\n", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    //TEXT RENDER ENGINE
+    app->text_engine = TTF_CreateRendererTextEngine(app->renderer);
+    if (!app->text_engine)
+    {
+        SDL_Log("Failed to create TextEngine: %s\n", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
 
     app->last_tick = SDL_GetTicks();
 
@@ -211,7 +285,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
  * Return values are the same as from SDL_AppIterate(), so you can terminate in
  * response to SDL_EVENT_QUIT, etc.
  */
-SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
+SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 {
     App* app = (App*)appstate;
     switch (event->type)
@@ -222,10 +296,21 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
             "Window Resized: callback data: %dx%d",
             event->window.data1, event->window.data2
         );
-        app->window.width  = event->window.data1;
+        app->window.width = event->window.data1;
         app->window.height = event->window.data2;
+        break;
+    case SDL_EVENT_KEY_DOWN:
+        process_event_key_down(app, event->key);
+        break;
+    case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+        app->window.fullscreen = true;
+        break;
+    case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+        app->window.fullscreen = false;
+        break;
     default: return SDL_APP_CONTINUE;
     }
+    return SDL_APP_CONTINUE;
 }
 
 /* This is called once before terminating the app--assuming the app isn't being
@@ -243,13 +328,15 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
  * The SDL_AppResult value that terminated the app is provided here, in case
  * it's useful to know if this was a successful or failing run of the app.
  */
-void SDL_AppQuit(void *appstate, SDL_AppResult result)
+void SDL_AppQuit(void* appstate, SDL_AppResult result)
 {
-    if (appstate != NULL)
-    {
-        App* app = (App*)appstate;
-        SDL_DestroyRenderer(app->renderer);
-        SDL_DestroyWindow(app->window.sdl);
-        SDL_free(app);
-    }
+    if (appstate == NULL) return;
+
+    App* app = (App*)appstate;
+
+    TTF_CloseFont(app->font);
+    TTF_DestroyRendererTextEngine(app->text_engine);
+    SDL_DestroyRenderer(app->renderer);
+    SDL_DestroyWindow(app->window.sdl);
+    SDL_free(app);
 }
