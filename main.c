@@ -1,7 +1,3 @@
-#include <stdio.h>
-#include <stdint.h>
-#include <malloc.h>
-
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -28,13 +24,17 @@ const char* APP_TITLE       = "ROGUELIKE GAME";
 const char* APP_VERSION     = "0.1.0";
 const char* APP_IDENTIFIER  = "com.otone.roguelike";
 
-const int SDL_WINDOW_WIDTH  = 1920;
-const int SDL_WINDOW_HEIGHT = 1080;
+#define SDL_WINDOW_WIDTH  800
+#define SDL_WINDOW_HEIGHT 600
+
+#define TARGET_FPS 30
+const Uint64 TICK_RATE_IN_MS = (Uint64)(1.0f / (float)TARGET_FPS * 1000.0f);
+const float DELTA_TIME = (float)TICK_RATE_IN_MS / 1000.0f;
 
 typedef struct
 {
-    uint8_t pos_x;
-    uint8_t pos_y;
+    float pos_x;
+    float pos_y;
 } Player;
 
 typedef struct
@@ -44,10 +44,68 @@ typedef struct
 
 typedef struct
 {
+    float pos_x, pos_y;
+} Mouse;
+
+typedef struct
+{
+    SDL_Window* sdl;
+    int width, height;
+} Window;
+
+typedef struct
+{
+    Window window;
     Game game;
-    SDL_Window* window;
+    Mouse mouse;
     SDL_Renderer* renderer;
+    Uint64 last_tick;
 } App;
+
+static App default_app()
+{
+    return (App) {
+        .window = (Window){
+            .width = SDL_WINDOW_WIDTH,
+            .height = SDL_WINDOW_HEIGHT,
+        },
+    };
+}
+
+static void app_tick(App* app)
+{
+    app->game.player.pos_x = app->mouse.pos_x;
+    app->game.player.pos_y = app->mouse.pos_y;
+}
+
+static void app_draw(const App* app)
+{
+    SDL_SetRenderDrawColor(app->renderer, 0, 255, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(app->renderer);
+
+
+    SDL_SetRenderDrawColor(app->renderer, 128,0,0,SDL_ALPHA_OPAQUE);
+    SDL_RenderLine(app->renderer,
+        0,0,
+        (float)app->window.width, (float)app->window.height
+    );
+
+    SDL_RenderDebugText(app->renderer,
+    app->game.player.pos_x,// (float)SDL_WINDOW_WIDTH * 0.5f,
+    app->game.player.pos_y,//(float)SDL_WINDOW_HEIGHT * 0.5f,
+        "HELLO ROGUE!");
+
+    SDL_FRect rect = (SDL_FRect){
+        .w = (float)app->window.width   * 0.25f,
+        .h = (float)app->window.height  * 0.25f,
+    };
+    rect.x = (float)app->window.width   * 0.5f - rect.w * 0.5f;
+    rect.y = (float)app->window.height  * 0.5f - rect.h * 0.5f;
+
+    SDL_RenderFillRect(app->renderer, &rect);
+
+    SDL_RenderPresent(app->renderer);
+}
 
 /*
  *  This will be called once before anything else. argc/argv work like they
@@ -87,14 +145,20 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
     if (app == NULL)
         return SDL_APP_FAILURE;
 
+    *app = default_app();
     *appstate = app;
 
     if (!SDL_CreateWindowAndRenderer(
         APP_TITLE,
         SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
         SDL_WINDOW_BORDERLESS,
-        &app->window, &app->renderer)
+        &app->window.sdl, &app->renderer)
     ) return SDL_APP_FAILURE;
+
+    if (!SDL_SetRenderVSync(app->renderer, 1))
+        return SDL_APP_FAILURE;
+
+    app->last_tick = SDL_GetTicks();
 
     return SDL_APP_CONTINUE;
 }
@@ -124,6 +188,18 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
  */
 SDL_AppResult SDL_AppIterate(void* appstate)
 {
+    App* app = (App*)appstate;
+    const Uint64 now = SDL_GetTicks();
+
+    SDL_GetMouseState(&app->mouse.pos_x, &app->mouse.pos_y);
+
+    while ((now - app->last_tick) >= TICK_RATE_IN_MS)
+    {
+        app_tick(app);
+        app->last_tick += TICK_RATE_IN_MS;
+    }
+
+    app_draw(app);
     return SDL_APP_CONTINUE;
 }
 
@@ -137,9 +213,17 @@ SDL_AppResult SDL_AppIterate(void* appstate)
  */
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
+    App* app = (App*)appstate;
     switch (event->type)
     {
     case SDL_EVENT_QUIT: return SDL_APP_SUCCESS;
+    case SDL_EVENT_WINDOW_RESIZED:
+        SDL_Log(
+            "Window Resized: callback data: %dx%d",
+            event->window.data1, event->window.data2
+        );
+        app->window.width  = event->window.data1;
+        app->window.height = event->window.data2;
     default: return SDL_APP_CONTINUE;
     }
 }
@@ -165,7 +249,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
     {
         App* app = (App*)appstate;
         SDL_DestroyRenderer(app->renderer);
-        SDL_DestroyWindow(app->window);
+        SDL_DestroyWindow(app->window.sdl);
         SDL_free(app);
     }
 }
