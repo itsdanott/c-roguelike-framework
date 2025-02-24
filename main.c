@@ -1,7 +1,10 @@
 #include "tiny_ttf.h"
+
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <SDL3/SDL_render.h>
+
 
 /*
  * C ROGUELIKE FRAMEWORK *******************************************************
@@ -58,6 +61,7 @@ typedef struct
 typedef struct
 {
     Window window;
+    SDL_Renderer* renderer;
     Game game;
     Mouse mouse;
     Uint64 last_tick;
@@ -150,15 +154,34 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
     *appstate = app;
 
 
-    if (!SDL_CreateWindow(
+    SDL_Window* window = SDL_CreateWindow(
         APP_TITLE,
         SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
-        SDL_WINDOW_OPENGL)
-    )
+        SDL_WINDOW_MAXIMIZED
+#if defined(SOKOL_METAL)
+        | SDL_WINDOW_METAL
+#else
+        | SDL_WINDOW_OPENGL
+#endif
+    );
+
+    if (!window)
     {
         SDL_Log("Failed to create Window: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
     }
+    app->window.sdl = window;
+
+    SDL_Renderer* renderer = SDL_CreateRenderer(window,
+        "opengl"//"opengles2 <- emscripten
+    );
+
+    if (!renderer)
+    {
+        SDL_Log("Failed to create Renderer: %s\n", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    app->renderer = renderer;
 
     app->last_tick = SDL_GetTicks();
 
@@ -182,7 +205,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
  * some regular frequency.
  *
  * The platform may choose to run this more or less (perhaps less in the
- * background, etc), or it might just call this function in a loop as fast
+ * background, etc.), or it might just call this function in a loop as fast
  * as possible.
  *
  * You do not check the event queue in this function (SDL_AppEvent exists
@@ -207,7 +230,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 
 /*
  * This will be called whenever an SDL event arrives.
- * Your app should not call SDL_PollEvent, SDL_PumpEvent, etc, as SDL
+ * Your app should not call SDL_PollEvent, SDL_PumpEvent, etc., as SDL
  * will manage all this for you.
  *
  * Return values are the same as from SDL_AppIterate(), so you can terminate in
@@ -267,6 +290,11 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result)
 
     App* app = (App*)appstate;
 
-    SDL_DestroyWindow(app->window.sdl);
+    if (app->window.sdl)
+        SDL_DestroyWindow(app->window.sdl);
+
+    if (app->renderer)
+        SDL_DestroyRenderer(app->renderer);
+
     SDL_free(app);
 }

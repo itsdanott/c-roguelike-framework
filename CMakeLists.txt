@@ -19,7 +19,8 @@ endif()
 
 add_executable(c_roguelike_framework
     main.c
-        tiny_ttf.h
+    tiny_ttf.h
+    third-party/sokol/sokol_gfx.h
 )
 
 target_link_libraries(c_roguelike_framework PRIVATE

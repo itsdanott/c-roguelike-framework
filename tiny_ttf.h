@@ -1,7 +1,3 @@
-//
-// Created by Danie on 17/02/2025.
-//
-
 #ifndef TINY_TTF_H
 #define TINY_TTF_H
 
