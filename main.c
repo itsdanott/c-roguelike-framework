@@ -157,12 +157,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
     SDL_Window* window = SDL_CreateWindow(
         APP_TITLE,
         SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
-        SDL_WINDOW_MAXIMIZED
-#if defined(SOKOL_METAL)
-        | SDL_WINDOW_METAL
-#else
-        | SDL_WINDOW_OPENGL
-#endif
+        SDL_WINDOW_MAXIMIZED | SDL_WINDOW_OPENGL
     );
 
     if (!window)
@@ -173,7 +168,11 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
     app->window.sdl = window;
 
     SDL_Renderer* renderer = SDL_CreateRenderer(window,
-        "opengl"//"opengles2 <- emscripten
+#if defined (SDL_PLATFORM_EMSCRIPTEN)
+        "opengles2"
+#else
+        "opengl"
+#endif
     );
 
     if (!renderer)
