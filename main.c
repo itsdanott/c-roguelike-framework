@@ -2,7 +2,6 @@
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
-#include <SDL3_ttf/SDL_ttf.h>
 
 /*
  * C ROGUELIKE FRAMEWORK *******************************************************
@@ -61,10 +60,6 @@ typedef struct
     Window window;
     Game game;
     Mouse mouse;
-    SDL_Renderer* renderer;
-    TTF_Font* font;
-    TTF_TextEngine* text_engine;
-
     Uint64 last_tick;
 } App;
 
@@ -75,7 +70,6 @@ static App default_app()
             .width = SDL_WINDOW_WIDTH,
             .height = SDL_WINDOW_HEIGHT,
         },
-        .font = NULL,
     };
 }
 
@@ -87,42 +81,6 @@ static void app_tick(App* app)
 
 static void app_draw(const App* app)
 {
-    SDL_SetRenderDrawColor(app->renderer, 0, 255, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(app->renderer);
-
-
-    SDL_SetRenderDrawColor(app->renderer, 128, 0, 0,SDL_ALPHA_OPAQUE);
-    SDL_RenderLine(
-        app->renderer,
-        0, 0,
-        (float)app->window.width, (float)app->window.height
-    );
-
-    SDL_RenderDebugText(
-        app->renderer,
-        app->game.player.pos_x,
-        app->game.player.pos_y,
-        "HELLO ROGUE!"
-    );
-
-    SDL_FRect rect = (SDL_FRect){
-        .w = (float)app->window.width * 0.25f,
-        .h = (float)app->window.height * 0.25f,
-    };
-    rect.x = (float)app->window.width * 0.5f - rect.w * 0.5f;
-    rect.y = (float)app->window.height * 0.5f - rect.h * 0.5f;
-
-    SDL_RenderFillRect(app->renderer, &rect);
-
-
-    //TEXT Test
-    TTF_Text* txt = TTF_CreateText(app->text_engine, app->font,
-                                   "Hello Rogue!", 0);
-    TTF_SetTextColor(txt, 128, 128, 0, SDL_ALPHA_OPAQUE);
-    TTF_DrawRendererText(txt, app->game.player.pos_x, rect.y);
-    TTF_DestroyText(txt);
-
-    SDL_RenderPresent(app->renderer);
 }
 
 static void process_event_key_down(App* app, const SDL_KeyboardEvent event)
@@ -191,44 +149,14 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
     *app = default_app();
     *appstate = app;
 
-    if (!SDL_CreateWindowAndRenderer(
-            APP_TITLE,
-            SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
-            SDL_WINDOW_BORDERLESS,
-            &app->window.sdl, &app->renderer)
+
+    if (!SDL_CreateWindow(
+        APP_TITLE,
+        SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
+        SDL_WINDOW_OPENGL)
     )
     {
-        SDL_Log("Failed to CreateWindowAndRenderer: %s\n", SDL_GetError());
-        return SDL_APP_FAILURE;
-    }
-
-    if (!SDL_SetRenderVSync(app->renderer, 1))
-    {
-        SDL_Log("Failed to SetRenderVSync = 1: %s\n", SDL_GetError());
-        return SDL_APP_FAILURE;
-    }
-
-    //FONT
-    if (!TTF_Init())
-    {
-        SDL_Log("Failed to initialize SDL_ttf: %s\n", SDL_GetError());
-        return SDL_APP_FAILURE;
-    }
-
-    app->font = TTF_OpenFontIO(
-        SDL_IOFromConstMem(tiny_ttf, tiny_ttf_len),
-        true, 18.0f);
-    if (!app->font)
-    {
-        SDL_Log("Failed to open Font: %s\n", SDL_GetError());
-        return SDL_APP_FAILURE;
-    }
-
-    //TEXT RENDER ENGINE
-    app->text_engine = TTF_CreateRendererTextEngine(app->renderer);
-    if (!app->text_engine)
-    {
-        SDL_Log("Failed to create TextEngine: %s\n", SDL_GetError());
+        SDL_Log("Failed to create Window: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
@@ -291,6 +219,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
     switch (event->type)
     {
     case SDL_EVENT_QUIT: return SDL_APP_SUCCESS;
+
     case SDL_EVENT_WINDOW_RESIZED:
         SDL_Log(
             "Window Resized: callback data: %dx%d",
@@ -299,15 +228,19 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
         app->window.width = event->window.data1;
         app->window.height = event->window.data2;
         break;
+
     case SDL_EVENT_KEY_DOWN:
         process_event_key_down(app, event->key);
         break;
+
     case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
         app->window.fullscreen = true;
         break;
+
     case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
         app->window.fullscreen = false;
         break;
+
     default: return SDL_APP_CONTINUE;
     }
     return SDL_APP_CONTINUE;
@@ -334,9 +267,6 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result)
 
     App* app = (App*)appstate;
 
-    TTF_CloseFont(app->font);
-    TTF_DestroyRendererTextEngine(app->text_engine);
-    SDL_DestroyRenderer(app->renderer);
     SDL_DestroyWindow(app->window.sdl);
     SDL_free(app);
 }
