@@ -14,17 +14,19 @@ if(EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".html" CACHE INTERNAL "")
 endif()
 
+add_subdirectory(third-party/glad-3.3core-3.0es)
+
 #add_compile_options(-Wall -Werror -Wpedantic)
 #add_compile_options(-Wextra -Wconversion)
 
 add_executable(c_roguelike_framework
     main.c
     tiny_ttf.h
-    third-party/sokol/sokol_gfx.h
 )
 
 target_link_libraries(c_roguelike_framework PRIVATE
         SDL3::SDL3
+        glad
 )
 
 if(EMSCRIPTEN)
@@ -32,6 +34,6 @@ if(EMSCRIPTEN)
         SUFFIX ".html"
     )
     set_target_properties(c_roguelike_framework PROPERTIES LINK_FLAGS
-        "--shell-file ${CMAKE_SOURCE_DIR}/third-party/emscripten/shell_minimal_modified.html"
+        "-sMAX_WEBGL_VERSION=2 --shell-file ${CMAKE_SOURCE_DIR}/third-party/emscripten/shell_minimal_modified.html"
     )
 endif()

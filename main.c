@@ -1,29 +1,36 @@
-#include "tiny_ttf.h"
+#include <glad/glad.h>
 
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_render.h>
 
-
 /*
  * C ROGUELIKE FRAMEWORK *******************************************************
  * This is a lightweight C framework in preparation for 7drl 2025.
  * It also serves as a learning project to get started learning SDL3.
  *
- * Ideally the only dependency is SDL.
- * So instead of the typical route via stb, miniaudio and so on we want to do
- * everything with the SDL libs (SDL, SDL_ttf, SDL_mixer and SDL_image).
+ * For simplicity, we'll use GL 3.3 core for all desktop platform and GL ES 3.0
+ * for web as the feature set of these two gl versions is quite close to each
+ * other.
  *
- * Planned target platforms:
+ * Ttarget platforms:
  *   -Windows
  *   -Linux
  *   -macOS
  *   -Emscripten
  *
+ * Third Party Libs:
+ *  -sdl
+ *  -miniaudio
+ *  -stb_image
+ *  -stb_truetype
+ *  -FastNoise Lite
+ *
  *******************************************************************************
  */
 
+/* GLOBALS ********************************************************************/
 const char* APP_TITLE       = "ROGUELIKE GAME";
 const char* APP_VERSION     = "0.1.0";
 const char* APP_IDENTIFIER  = "com.otone.roguelike";
@@ -34,6 +41,28 @@ const char* APP_IDENTIFIER  = "com.otone.roguelike";
 #define TARGET_FPS 30
 const Uint64 TICK_RATE_IN_MS = (Uint64)(1.0f / (float)TARGET_FPS * 1000.0f);
 const float DELTA_TIME = (float)TICK_RATE_IN_MS / 1000.0f;
+
+const char* GLSL_SOURCE_HEADER =
+    #if defined(SDL_PLATFORM_EMSCRIPTEN)
+    "#version 300 es\n"
+    #else
+    "#version 330 core\n"
+    #endif
+    "precision mediump float;\n";
+const char* test_shader_vert  =
+    "layout(location=0) in vec3 inPos;\n"
+    "layout(location=1) in vec3 inCol;\n"
+    "out vec3 Color;\n"
+    "void main() {\n"
+    "   gl_Position = vec4(inPos, 1.0);\n"
+    "   Color = inCol;\n"
+    "}";
+const char* test_shader_frag =
+    "in vec3 Color;\n"
+    "out vec4 FragColor;\n"
+    "void main() {\n"
+    "   FragColor = vec4(Color.rgb, 1.0);\n"
+    "}";
 
 typedef struct
 {
@@ -54,17 +83,118 @@ typedef struct
 typedef struct
 {
     SDL_Window* sdl;
+    SDL_GLContext gl_context;
     int width, height;
     bool fullscreen;
 } Window;
 
+/* RENDERER *******************************************************************/
+typedef struct
+{
+    GLuint vao, vbo;
+} Renderer;
+
+void renderer_init(Renderer* renderer)
+{
+    glGenBuffers(1, &renderer->vbo);
+    SDL_assert(renderer->vbo != 0);
+
+    glGenVertexArrays(1, &renderer->vao);
+    SDL_assert(renderer->vao != 0);
+}
+
+void renderer_cleanup(const Renderer* renderer)
+{
+    SDL_assert(renderer->vbo != 0);
+    glDeleteBuffers(1, &renderer->vbo);
+
+    SDL_assert(renderer->vao != 0);
+    glDeleteVertexArrays(1, &renderer->vao);
+}
+
+/* SHADER *********************************************************************/
+typedef enum
+{
+    SHADER_TYPE_VERTEX,
+    SHADER_TYPE_FRAGMENT,
+} Shader_Type;
+
+typedef struct
+{
+    GLuint id;
+    Shader_Type type;
+} Shader;
+
+typedef struct
+{
+    GLuint id;
+} Shader_Program;
+
+bool check_shader_compilation(const GLuint shader)
+{
+    int success;
+    int shaderType;
+
+    glGetShaderiv(shader, GL_SHADER_TYPE, &shaderType);
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+
+    if (!success)
+    {
+        char infoLog[512];
+        glGetShaderInfoLog(shader, 512, NULL, infoLog);
+        SDL_Log("shader compilation failed: %s", infoLog);
+        return false;
+    }
+
+    return true;
+}
+
+Shader compile_shader(const char* source, const Shader_Type type)
+{
+    Shader shader = {0};
+    GLenum gl_shader_type = 0;
+    switch (type)
+    {
+    case SHADER_TYPE_VERTEX:
+        gl_shader_type = GL_VERTEX_SHADER;
+        break;
+    case SHADER_TYPE_FRAGMENT:
+        gl_shader_type = GL_FRAGMENT_SHADER;
+        break;
+    }
+    shader.id = glCreateShader(gl_shader_type);
+    const char* strs[] = { GLSL_SOURCE_HEADER, source };
+    glShaderSource(shader.id, 2, strs, NULL);
+    glCompileShader(shader.id);
+    SDL_assert(check_shader_compilation(shader.id));
+    return shader;
+}
+
+void delete_shader(Shader* shader)
+{
+    glDeleteShader(shader->id);
+    shader->id = 0;
+}
+
+Shader_Program link_shaders(const Shader* vertex, const Shader* fragment)
+{
+    Shader_Program program = {0};
+    program.id = glCreateProgram();
+    glAttachShader(program.id, vertex->id);
+    glAttachShader(program.id, fragment->id);
+    glLinkProgram(program.id);
+    return program;
+}
+
+/* APP ************************************************************************/
 typedef struct
 {
     Window window;
-    SDL_Renderer* renderer;
     Game game;
     Mouse mouse;
     Uint64 last_tick;
+    Renderer test_renderer;
+    Shader_Program test_shader;
 } App;
 
 static App default_app()
@@ -77,6 +207,33 @@ static App default_app()
     };
 }
 
+static void app_init(App* app)
+{
+    Shader vert = compile_shader(test_shader_vert, SHADER_TYPE_VERTEX);
+    Shader frag = compile_shader(test_shader_frag, SHADER_TYPE_FRAGMENT);
+    app->test_shader = link_shaders(&vert, &frag);
+    delete_shader(&vert);
+    delete_shader(&frag);
+
+    renderer_init(&app->test_renderer);
+    glBindBuffer(GL_ARRAY_BUFFER, app->test_renderer.vbo);
+    glBindVertexArray(app->test_renderer.vao);
+
+    const float vertices[] = {
+        // positions            // colors
+        0.0f,  0.5f, 0.5f,     1.0f, 0.0f, 0.0f,
+        0.5f, -0.5f, 0.5f,     0.0f, 1.0f, 0.0f,
+       -0.5f, -0.5f, 0.5f,     0.0f, 0.0f, 1.0f,
+    };
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 18, &vertices[0], GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3,  GL_FLOAT, GL_FALSE, 6 * sizeof(float), NULL);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3,  GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+        (void*)(3 * sizeof(float)));
+}
+
 static void app_tick(App* app)
 {
     app->game.player.pos_x = app->mouse.pos_x;
@@ -85,9 +242,29 @@ static void app_tick(App* app)
 
 static void app_draw(const App* app)
 {
+    glClearColor(0.25f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glViewport(0, 0, app->window.width, app->window.height);
+
+    glUseProgram(app->test_shader.id);
+    glBindBuffer(GL_ARRAY_BUFFER, app->test_renderer.vbo);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    SDL_GL_SwapWindow(app->window.sdl);
 }
 
-static void process_event_key_down(App* app, const SDL_KeyboardEvent event)
+static void app_cleanup(App* app)
+{
+    renderer_cleanup(&app->test_renderer);
+    SDL_GL_DestroyContext(app->window.gl_context);
+
+    if (app->window.sdl)
+        SDL_DestroyWindow(app->window.sdl);
+
+    SDL_free(app);
+}
+
+static void app_event_key_down(App* app, const SDL_KeyboardEvent event)
 {
     switch (event.key)
     {
@@ -99,10 +276,7 @@ static void process_event_key_down(App* app, const SDL_KeyboardEvent event)
     }
 }
 
-/*******************************************************************************
- * SDL callbacks
- ******************************************************************************/
-
+/* SDL callbacks **************************************************************/
 /*
  *  This will be called once before anything else. argc/argv work like they
  *  always do.
@@ -153,11 +327,10 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
     *app = default_app();
     *appstate = app;
 
-
     SDL_Window* window = SDL_CreateWindow(
         APP_TITLE,
         SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
-        SDL_WINDOW_MAXIMIZED | SDL_WINDOW_OPENGL
+        SDL_WINDOW_MAXIMIZED | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
     );
 
     if (!window)
@@ -167,20 +340,25 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
     }
     app->window.sdl = window;
 
-    SDL_Renderer* renderer = SDL_CreateRenderer(window,
 #if defined (SDL_PLATFORM_EMSCRIPTEN)
-        "opengles2"
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 #else
-        "opengl"
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #endif
-    );
 
-    if (!renderer)
+    app->window.gl_context = SDL_GL_CreateContext(window);
+
+    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress))
     {
-        SDL_Log("Failed to create Renderer: %s\n", SDL_GetError());
+        SDL_Log("Failed to load OpenGL via Glad: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
     }
-    app->renderer = renderer;
+
+    app_init(app);
 
     app->last_tick = SDL_GetTicks();
 
@@ -252,7 +430,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
         break;
 
     case SDL_EVENT_KEY_DOWN:
-        process_event_key_down(app, event->key);
+        app_event_key_down(app, event->key);
         break;
 
     case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
@@ -289,11 +467,5 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result)
 
     App* app = (App*)appstate;
 
-    if (app->window.sdl)
-        SDL_DestroyWindow(app->window.sdl);
-
-    if (app->renderer)
-        SDL_DestroyRenderer(app->renderer);
-
-    SDL_free(app);
+    app_cleanup(app);
 }
