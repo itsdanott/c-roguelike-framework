@@ -43,7 +43,15 @@ if(EMSCRIPTEN)
     set_target_properties(c_roguelike_framework PROPERTIES
         SUFFIX ".html"
     )
-    set_target_properties(c_roguelike_framework PROPERTIES LINK_FLAGS
-"-sMAX_WEBGL_VERSION=2 --shell-file ${CMAKE_SOURCE_DIR}/third-party/emscripten/shell_minimal_modified.html --use-preload-plugins --preload-file ${CMAKE_SOURCE_DIR}/assets@/assets"
+    set(EMSCRIPTEN_LINK_FLAGS
+        "-sMAX_WEBGL_VERSION=2"
+        "--shell-file=${CMAKE_SOURCE_DIR}/third-party/emscripten/shell_minimal_modified.html"
+        "--use-preload-plugins"
+        "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
+        "-sSTACK_SIZE=1000000" # 1 MB Stack size
     )
+    string(JOIN " " LINK_FLAGS_STR ${EMSCRIPTEN_LINK_FLAGS})
+
+    set_target_properties(c_roguelike_framework PROPERTIES LINK_FLAGS "${LINK_FLAGS_STR}")
+
 endif()

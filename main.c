@@ -60,10 +60,13 @@ const char* APP_IDENTIFIER = "com.otone.roguelike";
 const u64 TICK_RATE_IN_MS = (u64)(1.0f / (float)TARGET_FPS * 1000.0f);
 const float DELTA_TIME = (float)TICK_RATE_IN_MS / 1000.0f;
 
-#define FONT_SIZE 18 //18 is the upper limit for Tiny.ttf and 128px Texture size
+//FONT_SIZE-Values for 128px FONT_TEXTURE_SIZE
+//16 - Born2bSportyV2.ttf
+//18 - Tiny.ttf
+#define FONT_SIZE 16
 #define FONT_TEXTURE_SIZE 128
 #define FONT_TAB_SIZE 1.5f
-#define FONT_SPACE_SIZE 0.25f
+#define FONT_SPACE_SIZE 3
 //see https://en.wikipedia.org/wiki/List_of_Unicode_characters#Control_codes
 //for the entire Unicode range we use 96 characters
 #define FONT_UNICODE_START 32
@@ -117,6 +120,25 @@ const char* rect_shader_frag =
     "    }\n"
     "    FragColor = vec4(sampleColor.rgb * Color, 1.0);\n"
     "}";
+const char* viewport_shader_vert =
+    "layout (location = 0) in vec2 inPos;\n"
+    "layout (location = 1) in vec2 inTexCoords;\n"
+    "out vec2 TexCoords;\n"
+    "void main() {\n"
+    "    gl_Position = vec4(inPos.x, inPos.y, 0.0, 1.0);\n"
+    "    TexCoords = inTexCoords;\n"
+    "}";
+
+const char* viewport_shader_frag =
+    "out vec4 FragColor;\n"
+    "in vec2 TexCoords;\n"
+    "uniform sampler2D viewportTexture;\n"
+    "void main() {\n"
+    "    vec4 fragColor = texture(viewportTexture, TexCoords);\n"
+    "    float gamma = 2.2;\n"
+    "    fragColor.rgb = pow(fragColor.rgb, vec3(1.0/gamma));\n"
+    "    FragColor = fragColor;\n"
+    "}";
 
 #define MAX_PATH_LEN 1024
 
@@ -131,10 +153,10 @@ char TEMP_PATH[MAX_PATH_LEN];
 
 const char* FONT_PATH = "font-tiny/tiny.ttf";
 
-//For desktop this is 32 - but we'll go with the lowest denominator: web
+//For desktop this is 32 - but we'll go with the lowest common denominator: web
 #define MAX_TEXTURE_SLOTS 16
 
-#define RECT_BUFFER_CAPACITY 128
+#define RECT_BUFFER_CAPACITY 2048
 #define RECT_VERTEX_BUFFER_CAPACITY (RECT_BUFFER_CAPACITY*6)
 
 /* MISC ***********************************************************************/
@@ -174,6 +196,13 @@ typedef struct {
 typedef struct {
     float x, y, z;
 } vec3;
+
+typedef struct {
+    union {
+        struct { float x, y, z, w; };// For position
+        struct { float r, g, b, a; };// For color
+    };
+} vec4;
 
 vec2 vec2_mul_float(const vec2 vec, const float fac) {
     return (vec2){
@@ -229,10 +258,15 @@ mat4 mat4_ortho(
 }
 
 /* COLORS *********************************************************************/
-#define COLOR_RED       (vec3){1.0f,0.0f,0.0f}
-#define COLOR_GREEN     (vec3){0.0f,1.0f,0.0f}
-#define COLOR_BLUE      (vec3){0.0f,0.0f,1.0f}
-#define COLOR_WHITE     (vec3){1.0f,1.0f,1.0f}
+#define COLOR_RED       (vec3){1.00f,0.00f,0.00f}
+#define COLOR_GREEN     (vec3){0.00f,1.00f,0.00f}
+#define COLOR_BLUE      (vec3){0.00f,0.00f,1.00f}
+#define COLOR_YELLOW    (vec3){1.00f,1.00f,0.00f}
+#define COLOR_MAGENTA   (vec3){1.00f,0.00f,1.00f}
+#define COLOR_BLACK     (vec3){0.00f,0.00f,0.00f}
+#define COLOR_GRAY      (vec3){0.50f,0.50f,0.50f}
+#define COLOR_GRAY_DARK (vec3){0.25f,0.25f,0.25f}
+#define COLOR_WHITE     (vec3){1.00f,1.00f,1.00f}
 
 /* RENDERER *******************************************************************/
 typedef struct {
@@ -292,6 +326,9 @@ char* temp_path_append(const char* base, const char* file) {
 }
 
 /* TEXTURE ********************************************************************/
+/*
+    For 7drl 2025 we want to use a SINGLE texture array for all things ui.
+ */
 typedef enum {
     //loaded via STB_Image
     TEXTURE_RAW_SOURCE_STB_IMAGE,
@@ -590,6 +627,198 @@ void delete_shader_program(const Shader_Program* shader) {
     glDeleteProgram(shader->id);
 }
 
+/* VIEWPORT *******************************************************************/
+/*
+    Viewports are frame buffers on which we can render to.
+    They can be any size, and are scaled up or down to fit the screen when their
+    when rendering their framebuffers to the window.
+
+    For now, we are using a framebuffer divisor - but we might switch to a hard
+    coded pixel dimension.
+
+    Still to be decided: How to handle coordinates between different resolutions
+    especially for UI layout and mouse click input handling.
+
+    Viewport Layers:
+    1. Game
+    2. UI
+
+ */
+typedef struct {
+    bool is_initialized;
+    vec2 screen_pos;
+    ivec2 display_size;
+    ivec2 frame_buffer_size;
+    float aspect_ratio;
+    u32 frame_buffer;
+    u32 frame_buffer_texture;
+    u32 render_buffer;
+
+    //to be initially configured
+    vec4 clear_color;
+    i32 frame_buffer_divisor;
+    bool has_blending;
+    bool has_depth_buffer;
+    bool floating_point_precision;
+} Viewport;
+
+Viewport default_viewport_game() {
+    return (Viewport) {
+        .clear_color = (vec4){0.f,0.f,0.f,1.f},
+        .frame_buffer_divisor = 8,
+        .has_blending = false,
+        .has_depth_buffer = true,
+        .floating_point_precision = false,
+    };
+}
+
+Viewport default_viewport_ui() {
+    return (Viewport) {
+        .clear_color = (vec4){0},
+        .frame_buffer_divisor = 4,
+        .has_blending = true,
+        .has_depth_buffer = true,
+        .floating_point_precision = false,
+    };
+}
+
+void viewport_cleanup (const Viewport* viewport) {
+    if (!viewport->is_initialized) return;
+    glDeleteFramebuffers(1, &viewport->frame_buffer);
+    glDeleteTextures(1, &viewport->frame_buffer_texture);
+    glDeleteRenderbuffers(1, &viewport->render_buffer);
+}
+
+i32 viewport_get_internal_format(
+    const bool has_blending,
+    const bool floating_point_precision
+) {
+    if (floating_point_precision) {
+        return has_blending ? GL_RGBA16 : GL_RGB16;
+    }
+    return has_blending ? GL_RGBA   : GL_RGB;
+}
+
+void viewport_generate(
+    Viewport* viewport,
+    const ivec2 display_size
+) {
+    viewport_cleanup(viewport);
+    viewport->display_size = display_size;
+    viewport->frame_buffer_size = (ivec2){
+        display_size.x / viewport->frame_buffer_divisor ,
+        display_size.y / viewport->frame_buffer_divisor ,
+    };
+    viewport->aspect_ratio = (float)display_size.x/(float)display_size.y;
+
+    glGenFramebuffers(1, &viewport->frame_buffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, viewport->frame_buffer);
+
+    glGenTextures(1, &viewport->frame_buffer_texture);
+    glBindTexture(GL_TEXTURE_2D, viewport->frame_buffer_texture);
+    glTexImage2D(
+        GL_TEXTURE_2D, 0,
+        viewport_get_internal_format(viewport->has_blending,
+            viewport->floating_point_precision),
+        viewport->frame_buffer_size.x,
+        viewport->frame_buffer_size.y,
+        0,
+        viewport->has_blending ? GL_RGBA : GL_RGB,
+        viewport->floating_point_precision ? GL_FLOAT : GL_UNSIGNED_BYTE,
+        NULL
+    );
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+        viewport->frame_buffer_texture, 0);
+
+    glGenRenderbuffers(1, &viewport->render_buffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, viewport->render_buffer);
+
+    if (viewport->has_depth_buffer) {
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+            viewport->frame_buffer_size.x, viewport->frame_buffer_size.y);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+            GL_RENDERBUFFER, viewport->render_buffer);
+    }
+
+    SDL_assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
+        GL_FRAMEBUFFER_COMPLETE);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    viewport->is_initialized = true;
+}
+
+void viewport_bind(const Viewport* viewport) {
+    glViewport(0, 0,
+        viewport->frame_buffer_size.x,
+        viewport->frame_buffer_size.y);
+    glBindFramebuffer(GL_FRAMEBUFFER, viewport->frame_buffer);
+    glClearColor(
+        viewport->clear_color.r,
+        viewport->clear_color.g,
+        viewport->clear_color.b,
+        viewport->clear_color.a);
+    if (viewport->has_depth_buffer) {
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+    } else {
+        glClear(GL_COLOR_BUFFER_BIT);
+        glDisable(GL_DEPTH_TEST);
+    }
+}
+
+//unbinds the current framebuffer and gets back to the full screen
+void viewport_unbind(const i32 width, const i32 height) {
+    glDisable(GL_DEPTH_TEST);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0,0, width, height);
+}
+
+void viewport_renderer_init(Renderer* renderer) {
+    const float vertices[] = {
+        //Position(XY)  TexCoord(XY)
+        -1.0f,  -1.0f,    0.0f,    0.0f,
+         1.0f,  -1.0f,    1.0f,    0.0f,
+         1.0f,   1.0f,    1.0f,    1.0f,
+
+         1.0f,   1.0f,    1.0f,    1.0f,
+        -1.0f,   1.0f,    0.0f,    1.0f,
+        -1.0f,  -1.0f,    0.0f,    0.0f,
+    };
+    renderer_init(renderer);
+    renderer_bind(renderer);
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 24,
+             &vertices[0], GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), NULL);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          (void*)(2 * sizeof(float)));
+}
+
+void viewport_render_to_window(
+    const Viewport* viewport,
+    const Renderer* renderer,
+    const Shader_Program* viewport_shader
+) {
+    if (viewport->has_blending) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
+
+    glUseProgram(viewport_shader->id);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, viewport->frame_buffer_texture);
+    glUniform1i(glGetUniformLocation(viewport_shader->id, "viewportTexture"), 0);
+    glBindVertexArray(renderer->vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    if (viewport->has_blending)
+        glDisable(GL_BLEND);
+}
+
 /* RECT RENDERING *************************************************************/
 /*
     Instead of the previous 'single-buffer-partial-update-only-on-change'
@@ -612,6 +841,10 @@ typedef struct {
     Rect rects[RECT_BUFFER_CAPACITY];
     size_t curr_len;
 } Rect_Buffer;
+
+void reset_rect_buffer(Rect_Buffer* rect_buffer) {
+    rect_buffer->curr_len = 0;
+}
 
 void render_text(
     const char* text,
@@ -639,17 +872,14 @@ void render_text(
         switch (c) {
         case '\n':
             x = 0;
-            y += FONT_SIZE * scale;
+            y += FONT_SIZE;
             continue;
-
         case '\t':
-            x += FONT_TAB_SIZE * scale;
+            x += FONT_TAB_SIZE;
             continue;
-
-        //BUG: this does not scale properly
-        // case ' ':
-        //     x += FONT_SPACE_SIZE * scale;
-        //     continue;
+         case ' ':
+             x += FONT_SPACE_SIZE;
+             continue;
         default: break;
         }
 
@@ -688,10 +918,37 @@ void render_text(
     rect_buffer->curr_len += glyph_iterator;
 }
 
+//NOTE: This is highly ineffcient - it duplicates the glyphs 4 times, introducing
+//overdraw and vertex redundancy. A shader based solution would be better.
+void render_text_outlined(
+    const char* text,
+    const Font* font,
+    const vec2 pos,
+    const vec3 color,
+    const float scale,
+    float sort_order,
+    Rect_Buffer* rect_buffer,
+    const float outline_offset,
+    const vec3 outline_color
+) {
+    render_text(text, font, pos, color, scale, sort_order, rect_buffer);
+    sort_order -= 1.0f;
+
+    render_text(text, font, (vec2){pos.x + outline_offset, pos.y},
+        outline_color, scale, sort_order, rect_buffer);
+    render_text(text, font, (vec2){pos.x - outline_offset, pos.y},
+        outline_color, scale, sort_order, rect_buffer);
+    render_text(text, font, (vec2){pos.x,pos.y + outline_offset},
+        outline_color, scale, sort_order, rect_buffer);
+    render_text(text, font, (vec2){pos.x,pos.y - outline_offset},
+        outline_color, scale, sort_order, rect_buffer);
+}
+
 typedef struct {
     vec2 pos;
     vec3 color;
     vec2 tex_coord;
+    //Min-Val = 0
     float sort_order;
 } Rect_Vertex;
 
@@ -774,11 +1031,15 @@ typedef struct {
     Renderer test_renderer;
     Shader_Program test_shader;
     Path asset_path;
-    Font font;
+    Font font1, font2;
     Renderer rect_renderer;
     Shader_Program rect_shader;
     Rect_Buffer rect_buffer;
     Rect_Vertex_Buffer rect_vertex_buffer;
+    Viewport viewport_game;
+    Viewport viewport_ui;
+    Renderer viewport_renderer;
+    Shader_Program viewport_shader;
 } App;
 
 static App default_app() {
@@ -787,19 +1048,31 @@ static App default_app() {
             .width = SDL_WINDOW_WIDTH,
             .height = SDL_WINDOW_HEIGHT,
         },
+        .viewport_game = default_viewport_game(),
+        .viewport_ui = default_viewport_ui(),
     };
 }
 
 static bool app_init(App* app) {
     asset_path_init(&app->asset_path);
-    const char* font_path = temp_path_append(app->asset_path.str, "tiny.ttf");
-    if (!font_load(font_path, &app->font))
-        return false;
+    const char* font1_path = temp_path_append(app->asset_path.str,
+        "Born2bSportyV2.ttf");
+    if (!font_load(font1_path, &app->font1))return false;
+    const char* font2_path = temp_path_append(app->asset_path.str,"tiny.ttf");
+    if (!font_load(font2_path, &app->font2))return false;
 
     app->test_shader = compile_shader_program(
         test_shader_vert, test_shader_frag);
     app->rect_shader = compile_shader_program(
         rect_shader_vert, rect_shader_frag);
+    app->viewport_shader = compile_shader_program(
+        viewport_shader_vert, viewport_shader_frag);
+
+    viewport_renderer_init(&app->viewport_renderer);
+    viewport_generate(&app->viewport_game,
+        (ivec2){app->window.width, app->window.height});
+    viewport_generate(&app->viewport_ui,
+        (ivec2){app->window.width, app->window.height});
 
     renderer_init(&app->test_renderer);
     renderer_bind(&app->test_renderer);
@@ -846,58 +1119,94 @@ static void app_tick(App* app) {
 }
 
 static void app_draw(App* app) {
-    glClearColor(0.125f, 0.125f, 0.125f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glViewport(0, 0, app->window.width, app->window.height);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    /* GAME *******************************************************************/
+    viewport_bind(&app->viewport_game);
 
     //Hello Triangle
     glUseProgram(app->test_shader.id);
     renderer_bind(&app->test_renderer);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
+    /* UI *********************************************************************/
+    viewport_bind(&app->viewport_ui);
+    reset_rect_buffer(&app->rect_buffer);
+
     //Rects
-    app->rect_buffer.curr_len = 0;
+    const float viewport_width  = (float) app->viewport_ui.frame_buffer_size.x;
+    const float viewport_height = (float) app->viewport_ui.frame_buffer_size.y;
+    const float window_width    = (float) app->window.width;
+    const float window_height   = (float) app->window.height;
+
+    const float font_scale = 1.f;
+    //this approach would allow for consistent font size among all viewport
+    //divisors - but it will come with other caveats - we still need to
+    //figure out a way to define the layout - maybe checkout clay for
+    //that purpose? (https://github.com/nicbarker/clay)
+    // const float font_scale = ((float)FONT_SIZE / (float)app->viewport_ui.frame_buffer_divisor) * 0.25f;
+
+    const Font* font = &app->font1;
     render_text(
         "Hello 7DRL 2025!",
-        &app->font,
+        font,
         (vec2){
-            (float)app->window.width * 0.5f,
-            (float)app->window.height * 0.5f,
+            (app->mouse.pos_x / window_width) * viewport_width,
+            viewport_height - (app->mouse.pos_y / window_height) * viewport_height,
         },
         COLOR_WHITE,
-        2.0f, 0.0f, &app->rect_buffer);
+        font_scale, 0.0f, &app->rect_buffer);
     render_text(
         "This is another line!",
-        &app->font,
+        font,
         (vec2){
-            (float)app->window.width * 0.5f,
-            (float)app->window.height * 0.5f + FONT_SIZE * 1.5f,
+            viewport_width  * .5f,
+            viewport_height * .5f + FONT_SIZE * 1.5f,
         },
         COLOR_RED,
-        2.0f, 0.0f, &app->rect_buffer);
-    render_text(
-        "+123456790 # HP!",
-        &app->font,
+        font_scale, 0.0f, &app->rect_buffer);
+    render_text_outlined(
+        "+1234567890 # HP!",
+        font,
         (vec2){
-            (float)app->window.width * 0.5f,
-            (float)app->window.height * 0.5f + FONT_SIZE * 3.0f,
+            viewport_width  * .5f,
+            viewport_height * .5f + FONT_SIZE * 3.f,
         },
         COLOR_GREEN,
-        2.0f, 0.0f, &app->rect_buffer);
-    render_text(
+        ((SDL_sinf((float)SDL_GetTicks() * 0.125f * DELTA_TIME) + 1.0f)/2.0f) * 4.5f, 1.0f,
+        &app->rect_buffer, 1.5f, COLOR_MAGENTA);
+    render_text_outlined(
         "!@#$%^&*()-+./,",
-        &app->font,
+        font,
         (vec2){
-            (float)app->window.width * 0.5f,
-            (float)app->window.height * 0.5f + FONT_SIZE * 4.5f,
+            viewport_width  * .5f,
+            viewport_height * .5f + FONT_SIZE * 4.5f,
         },
         COLOR_BLUE,
-        2.0f, 0.0f, &app->rect_buffer);
+        font_scale, 1.0f, &app->rect_buffer, 1.0f, COLOR_WHITE);
+    render_text(
+        "UPPERCASE LINE!",
+        font,
+        (vec2){
+            viewport_width  * .5f,
+            viewport_height * .5f + FONT_SIZE * 6.f,
+        },
+        COLOR_YELLOW,
+        font_scale, 0.0f, &app->rect_buffer);
+    render_text_outlined(
+        "BIG UPPERCASE LINE!\nHello My friend!~",
+        font,
+        (vec2){
+            viewport_width  * .125f,
+            viewport_height * .5f + FONT_SIZE * 8.f,
+        },
+        COLOR_MAGENTA,
+        font_scale * 1.5f, 1.0f, &app->rect_buffer, 1.0f, COLOR_WHITE);
 
     build_rect_vertex_buffer(&app->rect_buffer, &app->rect_vertex_buffer);
     glUseProgram(app->rect_shader.id);
     const mat4 ortho_mat = mat4_ortho(
-        0, (float)app->window.width, 0, (float)app->window.height, -1.0f, 1.0f);
+        0.f, viewport_width, 0.f, viewport_height, -1.f, 1.f);
     const i32 projection_loc = glGetUniformLocation(
         app->rect_shader.id, "projection");
     glUniformMatrix4fv(projection_loc, 1, GL_FALSE,
@@ -905,11 +1214,21 @@ static void app_draw(App* app) {
     const i32 texture_loc = glGetUniformLocation(
         app->rect_shader.id, "textureSampler");
     glUniform1i(texture_loc, 0);
-    gl_texture_bind(&app->font.texture, 0);
+    gl_texture_bind(&font->texture, 0);
     const i32 loc_alpha_clip_threshold = glGetUniformLocation(
         app->rect_shader.id, "alphaClipThreshold");
     glUniform1f(loc_alpha_clip_threshold, 0.5f);
     draw_rects(&app->rect_vertex_buffer, &app->rect_renderer);
+
+
+    /* SCREEN *****************************************************************/
+    viewport_unbind(app->window.width, app->window.height);
+
+    viewport_render_to_window(&app->viewport_game, &app->viewport_renderer,
+        &app->viewport_shader);
+
+    viewport_render_to_window(&app->viewport_ui, &app->viewport_renderer,
+        &app->viewport_shader);
 
     SDL_GL_SwapWindow(app->window.sdl);
 }
@@ -917,9 +1236,14 @@ static void app_draw(App* app) {
 static void app_cleanup(App* app) {
     delete_shader_program(&app->test_shader);
     delete_shader_program(&app->rect_shader);
-    font_delete(&app->font);
+    delete_shader_program(&app->viewport_shader);
+    font_delete(&app->font1);
+    font_delete(&app->font2);
+    viewport_cleanup(&app->viewport_game);
+    viewport_cleanup(&app->viewport_ui);
     renderer_cleanup(&app->test_renderer);
     renderer_cleanup(&app->rect_renderer);
+    renderer_cleanup(&app->viewport_renderer);
     SDL_GL_DestroyContext(app->window.gl_context);
     if (app->window.sdl)
         SDL_DestroyWindow(app->window.sdl);
@@ -1081,6 +1405,10 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
         );
         app->window.width = event->window.data1;
         app->window.height = event->window.data2;
+        viewport_generate(&app->viewport_game,
+            (ivec2){app->window.width, app->window.height});
+        viewport_generate(&app->viewport_ui,
+            (ivec2){app->window.width, app->window.height});
         break;
 
     case SDL_EVENT_KEY_DOWN:
