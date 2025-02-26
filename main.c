@@ -102,23 +102,27 @@ const char* rect_shader_vert =
     "layout(location = 1) in vec3 inColor;\n"
     "layout(location = 2) in vec2 inTexCoord;\n"
     "layout(location = 3) in float inSortOrder;\n"
+    "layout(location = 4) in int inTextureId;\n"
     "out vec2 TexCoords;\n"
     "out vec3 Color;\n"
+    "flat out int TextureId;\n"
     "uniform mat4 projection;\n"
     "void main(){\n"
     "    gl_Position = projection * vec4(inPos.xy, inSortOrder, 1.0);\n"
     "    Color = inColor;\n"
     "    TexCoords = inTexCoord;\n"
+    "    TextureId = inTextureId;\n"
     "}";
 const char* rect_shader_frag =
     "in vec2 TexCoords;\n"
     "in vec3 Color;\n"
+    "flat in int TextureId;\n"
     "out vec4 FragColor;\n"
-    "uniform sampler2D textureSampler;\n"
+    "uniform sampler2DArray textureArray;\n"
     "uniform float alphaClipThreshold;\n"
     "void main() {\n"
     "    //TODO: Find out how stb_tt deals with the y-axis for the glyphs. For now we'll simply hardcode the flip here\n"
-    "    vec4 sampleColor = texture(textureSampler, vec2(TexCoords.x, 1.0 - TexCoords.y));\n"
+    "    vec4 sampleColor = texture(textureArray, vec3(TexCoords.x, 1.0 - TexCoords.y, float(TextureId)));\n"
     "    if(sampleColor.a < alphaClipThreshold) {\n"
     "        discard;\n"
     "    }\n"
@@ -162,6 +166,8 @@ const char* FONT_PATH = "font-tiny/tiny.ttf";
 
 #define RECT_BUFFER_CAPACITY 2048
 #define RECT_VERTEX_BUFFER_CAPACITY (RECT_BUFFER_CAPACITY*6)
+#define RECT_MAX_SORT_ORDER 128.f
+#define RECT_MIN_SORT_ORDER (-RECT_MAX_SORT_ORDER)
 
 /* MISC ***********************************************************************/
 typedef struct {
@@ -203,8 +209,12 @@ typedef struct {
 
 typedef struct {
     union {
-        struct { float x, y, z, w; };// For position
-        struct { float r, g, b, a; };// For color
+        struct {
+            float x, y, z, w;
+        }; // For position
+        struct {
+            float r, g, b, a;
+        }; // For color
     };
 } vec4;
 
@@ -212,6 +222,14 @@ vec2 vec2_mul_float(const vec2 vec, const float fac) {
     return (vec2){
         vec.x * fac,
         vec.y * fac,
+    };
+}
+
+vec3 vec3_mul_float(const vec3 vec, const float fac) {
+    return (vec3){
+        vec.x * fac,
+        vec.y * fac,
+        vec.z * fac,
     };
 }
 
@@ -233,6 +251,13 @@ vec2 vec2_sub_vec2(const vec2 a, const vec2 b) {
     return (vec2){
         a.x - b.x,
         a.y - b.y,
+    };
+}
+
+vec2 vec2_sub_float(const vec2 a, const float b) {
+    return (vec2){
+        a.x - b,
+        a.y - b,
     };
 }
 
@@ -336,8 +361,10 @@ void asset_path_init(Path* asset_path) {
     SDL_snprintf(asset_path->str, MAX_PATH_LEN, "%s%s%c",
      base_path, asset_str, PATH_SLASH);
 #else
-    SDL_snprintf(asset_path->str, MAX_PATH_LEN, "%s..%c%s%c",
-                 base_path, PATH_SLASH, asset_str, PATH_SLASH);
+    SDL_snprintf(
+        asset_path->str, MAX_PATH_LEN, "%s..%c%s%c",
+        base_path, PATH_SLASH, asset_str, PATH_SLASH
+    );
 #endif
     asset_path->length = SDL_strlen(asset_path->str);
 }
@@ -393,31 +420,54 @@ Texture_Config TEXTURE_CONFIG_DEFAULT_GAMMACORRECT = (Texture_Config){
     .gamma_correction = true,
 };
 
-Raw_Texture raw_texture_rgba_from_single_channel(
+Raw_Texture* raw_texture_rgba_from_single_channel(
     const u8* single_channel_data,
     const i32 width, const i32 height
 ) {
-    u8* data = SDL_malloc(sizeof(u8) * width * height * 4);
-    for (i32 i = 0; i < width * height; i++) {
-        u8 gray_scale = single_channel_data[i];
-        data[i * 4 + 0] = gray_scale; //R
-        data[i * 4 + 1] = gray_scale; //G
-        data[i * 4 + 2] = gray_scale; //B
-        data[i * 4 + 3] = gray_scale; //A
-    }
-    return (Raw_Texture){
+    Raw_Texture* raw_texture = SDL_malloc(sizeof(Raw_Texture));
+    *raw_texture = (Raw_Texture){
         .width = width,
         .height = height,
         .channels = 4,
-        .data = data,
+        .data = SDL_malloc(sizeof(u8) * width * height * 4),
         .source = TEXTURE_RAW_SOURCE_DYNAMIC,
     };
+
+    for (i32 i = 0; i < width * height; i++) {
+        const u8 gray_scale = single_channel_data[i];
+        raw_texture->data[i * 4 + 0] = gray_scale; //R
+        raw_texture->data[i * 4 + 1] = gray_scale; //G
+        raw_texture->data[i * 4 + 2] = gray_scale; //B
+        raw_texture->data[i * 4 + 3] = gray_scale; //A
+    }
+
+    return raw_texture;
+}
+
+Raw_Texture* raw_texture_from_file(
+    const char* file_path
+) {
+    Raw_Texture* texture = SDL_malloc(sizeof(Raw_Texture));
+    *texture = (Raw_Texture){
+        .source = TEXTURE_RAW_SOURCE_STB_IMAGE,
+    };
+    texture->data = stbi_load(
+        file_path, &texture->width, &texture->height,
+        &texture->channels, 0
+    );
+    return texture;
 }
 
 void raw_texture_free(Raw_Texture* texture) {
     SDL_assert(texture != NULL);
     SDL_assert(texture->data != NULL);
-    SDL_free(texture->data);
+    switch (texture->source) {
+    case TEXTURE_RAW_SOURCE_DYNAMIC:
+        SDL_free(texture->data);
+        break;
+    case TEXTURE_RAW_SOURCE_STB_IMAGE:
+        stbi_image_free(texture->data);
+    }
     texture->data = NULL;
     texture = NULL;
 }
@@ -476,7 +526,8 @@ void texture_apply_config(const u32 target, const Texture_Config config) {
 
     if (config.filter) {
         glTexParameteri(
-            target,GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            target,GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR
+        );
         glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     } else {
         glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -493,13 +544,17 @@ GL_Texture gl_texture_from_raw_texture(
     glGenTextures(1, &texture.id);
     SDL_assert(texture.id > 0);
     gl_texture_bind(&texture, 0);
-    GL_Texture_Format format = gl_texture_get_format(raw_texture->channels,
-        config.gamma_correction);
+    GL_Texture_Format format = gl_texture_get_format(
+        raw_texture->channels,
+        config.gamma_correction
+    );
     texture_apply_config(GL_TEXTURE_2D, config);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, format.internal_format, raw_texture->width,
-                 raw_texture->height, 0, format.format, GL_UNSIGNED_BYTE,
-                 raw_texture->data);
+    glTexImage2D(
+        GL_TEXTURE_2D, 0, format.internal_format, raw_texture->width,
+        raw_texture->height, 0, format.format, GL_UNSIGNED_BYTE,
+        raw_texture->data
+    );
 
     glGenerateMipmap(GL_TEXTURE_2D);
 
@@ -512,17 +567,120 @@ void gl_texture_delete(const GL_Texture* texture) {
     glDeleteTextures(1, &texture->id);
 }
 
+/* TEXTURE ARRAY **************************************************************/
+typedef struct {
+    u32 id;
+    i32 num_textures;
+    i32 width, height, channels;
+    Texture_Config config;
+} GL_Texture_Array;
+
+void gl_texture_array_bind(
+    const GL_Texture_Array* texture_array,
+    const u32 slot
+) {
+    SDL_assert(texture_array != NULL);
+    SDL_assert(texture_array->id > 0);
+    SDL_assert(slot < MAX_TEXTURE_SLOTS);
+    glActiveTexture(GL_TEXTURE0 + slot);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, texture_array->id);
+}
+
+GL_Texture_Array gl_texture_array_generate(
+    Raw_Texture** textures,
+    const i32 num_textures,
+    const i32 width,
+    const i32 height,
+    const i32 channels,
+    const Texture_Config config,
+    const bool free_raw_textures
+) {
+    for (int i = 0; i < num_textures; i++) {
+        SDL_assert(textures[i] != NULL);
+        SDL_assert(textures[i]->width == width);
+        SDL_assert(textures[i]->height == height);
+        SDL_assert(textures[i]->channels == channels);
+    }
+
+    GL_Texture_Array texture_array = (GL_Texture_Array){
+        .num_textures = num_textures,
+        .width = width,
+        .height = height,
+        .channels = channels,
+        .config = config,
+    };
+
+    const GL_Texture_Format format = gl_texture_get_format(
+        channels, config.gamma_correction
+    );
+
+    glGenTextures(1, &texture_array.id);
+    gl_texture_array_bind(&texture_array, 0);
+    glTexImage3D(
+        GL_TEXTURE_2D_ARRAY,
+        0,
+        format.internal_format,
+        width,
+        height,
+        texture_array.num_textures,
+        0,
+        format.format,
+        GL_UNSIGNED_BYTE,
+        NULL
+    );
+
+    for (int i = 0; i < num_textures; i++) {
+        glTexSubImage3D(
+            GL_TEXTURE_2D_ARRAY,
+            0, 0, 0,
+            i, width, height, 1,
+            format.format,
+            GL_UNSIGNED_BYTE,
+            &textures[i]->data[0]
+        );
+    }
+    texture_apply_config(GL_TEXTURE_2D_ARRAY, config);
+    glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+
+    if (free_raw_textures) {
+        for (int i = 0; i < num_textures; i++) {
+            raw_texture_free(textures[i]);
+        }
+    }
+
+    return texture_array;
+}
+
+void texture_array_free(const GL_Texture_Array* texture_array) {
+    SDL_assert(texture_array != NULL);
+    SDL_assert(texture_array->id > 0);
+    glDeleteTextures(1, &texture_array->id);
+}
+
 /* FONT ***********************************************************************/
+typedef enum {
+    FONT_TEXTURE_TYPE_SINGLE,
+    FONT_TEXTURE_TYPE_ARRAY,
+} Font_Texture_Type;
+
 typedef struct {
     stbtt_fontinfo info;
     stbtt_pack_context pack_context;
     stbtt_packedchar char_data[FONT_UNICODE_RANGE];
-    GL_Texture texture;
+    Font_Texture_Type texture_type;
+
+    union {
+        GL_Texture texture;
+        i32 texture_id;
+    };
 } Font;
 
 //Loads the ttf, packs the glyphs it to an atlas and generates a rgba texture
 //If we will switch to texture arrays later on we'll need to split the logic.
-bool font_load(const char* file_path, Font* font) {
+Raw_Texture* font_load_raw_texture(
+    const char* file_path,
+    Font* font
+) {
     SDL_assert(font != NULL);
 
     SDL_Log("Path: %s", file_path);
@@ -534,40 +692,63 @@ bool font_load(const char* file_path, Font* font) {
     *font = (Font){0};
     if (!stbtt_InitFont(&font->info, file_data, 0)) {
         SDL_Log("Failed init font!");
-        return false;
+        return NULL;
     }
 
     u8 pixels[FONT_TEXTURE_SIZE * FONT_TEXTURE_SIZE];
     if (!stbtt_PackBegin(
         &font->pack_context, &pixels[0],
         FONT_TEXTURE_SIZE, FONT_TEXTURE_SIZE,
-        0, 1, NULL)) {
+        0, 1, NULL
+    )) {
         SDL_Log("Failed to font pack begin!");
-        return false;
+        return NULL;
     }
 
-    if (!stbtt_PackFontRange(&font->pack_context, file_data, 0, FONT_SIZE,
-                             FONT_UNICODE_START, FONT_UNICODE_RANGE,
-                             font->char_data)) {
+    if (!stbtt_PackFontRange(
+        &font->pack_context, file_data, 0, FONT_SIZE,
+        FONT_UNICODE_START, FONT_UNICODE_RANGE,
+        font->char_data
+    )) {
         SDL_Log("Failed to pack font range!");
-        return false;
+        return NULL;
     }
 
     stbtt_PackEnd(&font->pack_context);
     SDL_free(file_data);
 
-    Raw_Texture font_raw_texture = raw_texture_rgba_from_single_channel(
-        pixels, FONT_TEXTURE_SIZE,FONT_TEXTURE_SIZE);
-    font->texture = gl_texture_from_raw_texture(&font_raw_texture,
-                                                TEXTURE_CONFIG_DEFAULT);
-    raw_texture_free(&font_raw_texture);
+    Raw_Texture* raw_texture = raw_texture_rgba_from_single_channel(
+        pixels, FONT_TEXTURE_SIZE,FONT_TEXTURE_SIZE
+    );
+
+    return raw_texture;
+}
+
+bool font_load_single(const char* file_path, Font* font) {
+    Raw_Texture* raw_texture = font_load_raw_texture(file_path, font);
+    if (raw_texture == NULL)
+        return false;
+
+    font->texture_type = FONT_TEXTURE_TYPE_SINGLE;
+    font->texture = gl_texture_from_raw_texture(
+        raw_texture, TEXTURE_CONFIG_DEFAULT
+    );
+    raw_texture_free(raw_texture);
 
     return true;
 }
 
+Raw_Texture* font_load_for_array(const char* file_path, Font* font) {
+    Raw_Texture* raw_texture = font_load_raw_texture(file_path, font);
+    font->texture_type = FONT_TEXTURE_TYPE_ARRAY;
+    return raw_texture;
+}
+
 void font_delete(const Font* font) {
     SDL_assert(font != NULL);
-    gl_texture_delete(&font->texture);
+    if (font->texture_type == FONT_TEXTURE_TYPE_SINGLE) {
+        gl_texture_delete(&font->texture);
+    }
 }
 
 /* SHADER *********************************************************************/
@@ -686,9 +867,10 @@ typedef struct {
 } Viewport;
 
 Viewport default_viewport_game() {
-    return (Viewport) {
-        .clear_color = (vec4){0.f,0.f,0.f,1.f},
-        .frame_buffer_divisor = 8,
+    return (Viewport){
+        .screen_pos = (vec2){256, 0},
+        .clear_color = (vec4){0.f, 0.f, 0.f, 1.f},
+        .frame_buffer_divisor = 4,
         .has_blending = false,
         .has_depth_buffer = true,
         .floating_point_precision = false,
@@ -696,16 +878,16 @@ Viewport default_viewport_game() {
 }
 
 Viewport default_viewport_ui() {
-    return (Viewport) {
+    return (Viewport){
         .clear_color = (vec4){0},
-        .frame_buffer_divisor = 4,
+        .frame_buffer_divisor = 2,
         .has_blending = true,
         .has_depth_buffer = true,
         .floating_point_precision = false,
     };
 }
 
-void viewport_cleanup (const Viewport* viewport) {
+void viewport_cleanup(const Viewport* viewport) {
     if (!viewport->is_initialized) return;
     glDeleteFramebuffers(1, &viewport->frame_buffer);
     glDeleteTextures(1, &viewport->frame_buffer_texture);
@@ -719,7 +901,7 @@ i32 viewport_get_internal_format(
     if (floating_point_precision) {
         return has_blending ? GL_RGBA16 : GL_RGB16;
     }
-    return has_blending ? GL_RGBA   : GL_RGB;
+    return has_blending ? GL_RGBA : GL_RGB;
 }
 
 void viewport_generate(
@@ -729,10 +911,10 @@ void viewport_generate(
     viewport_cleanup(viewport);
     viewport->display_size = display_size;
     viewport->frame_buffer_size = (ivec2){
-        display_size.x / viewport->frame_buffer_divisor ,
-        display_size.y / viewport->frame_buffer_divisor ,
+        display_size.x / viewport->frame_buffer_divisor,
+        display_size.y / viewport->frame_buffer_divisor,
     };
-    viewport->aspect_ratio = (float)display_size.x/(float)display_size.y;
+    viewport->aspect_ratio = (float)display_size.x / (float)display_size.y;
 
     glGenFramebuffers(1, &viewport->frame_buffer);
     glBindFramebuffer(GL_FRAMEBUFFER, viewport->frame_buffer);
@@ -741,8 +923,10 @@ void viewport_generate(
     glBindTexture(GL_TEXTURE_2D, viewport->frame_buffer_texture);
     glTexImage2D(
         GL_TEXTURE_2D, 0,
-        viewport_get_internal_format(viewport->has_blending,
-            viewport->floating_point_precision),
+        viewport_get_internal_format(
+            viewport->has_blending,
+            viewport->floating_point_precision
+        ),
         viewport->frame_buffer_size.x,
         viewport->frame_buffer_size.y,
         0,
@@ -753,36 +937,48 @@ void viewport_generate(
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-        viewport->frame_buffer_texture, 0);
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+        viewport->frame_buffer_texture, 0
+    );
 
     glGenRenderbuffers(1, &viewport->render_buffer);
     glBindRenderbuffer(GL_RENDERBUFFER, viewport->render_buffer);
 
     if (viewport->has_depth_buffer) {
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
-            viewport->frame_buffer_size.x, viewport->frame_buffer_size.y);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-            GL_RENDERBUFFER, viewport->render_buffer);
+        glRenderbufferStorage(
+            GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+            viewport->frame_buffer_size.x,
+            viewport->frame_buffer_size.y
+        );
+        glFramebufferRenderbuffer(
+            GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+            GL_RENDERBUFFER, viewport->render_buffer
+        );
     }
 
-    SDL_assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
-        GL_FRAMEBUFFER_COMPLETE);
+    SDL_assert(
+        glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
+        GL_FRAMEBUFFER_COMPLETE
+    );
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     viewport->is_initialized = true;
 }
 
 void viewport_bind(const Viewport* viewport) {
-    glViewport(0, 0,
+    glViewport(
+        0, 0,
         viewport->frame_buffer_size.x,
-        viewport->frame_buffer_size.y);
+        viewport->frame_buffer_size.y
+    );
     glBindFramebuffer(GL_FRAMEBUFFER, viewport->frame_buffer);
     glClearColor(
         viewport->clear_color.r,
         viewport->clear_color.g,
         viewport->clear_color.b,
-        viewport->clear_color.a);
+        viewport->clear_color.a
+    );
     if (viewport->has_depth_buffer) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
@@ -796,30 +992,34 @@ void viewport_bind(const Viewport* viewport) {
 void viewport_unbind(const i32 width, const i32 height) {
     glDisable(GL_DEPTH_TEST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0,0, width, height);
+    glViewport(0, 0, width, height);
 }
 
 void viewport_renderer_init(Renderer* renderer) {
     const float vertices[] = {
         //Position(XY)  TexCoord(XY)
-        -1.0f,  -1.0f,    0.0f,    0.0f,
-         1.0f,  -1.0f,    1.0f,    0.0f,
-         1.0f,   1.0f,    1.0f,    1.0f,
+        -1.0f, -1.0f, 0.0f, 0.0f,
+        1.0f, -1.0f, 1.0f, 0.0f,
+        1.0f, 1.0f, 1.0f, 1.0f,
 
-         1.0f,   1.0f,    1.0f,    1.0f,
-        -1.0f,   1.0f,    0.0f,    1.0f,
-        -1.0f,  -1.0f,    0.0f,    0.0f,
+        1.0f, 1.0f, 1.0f, 1.0f,
+        -1.0f, 1.0f, 0.0f, 1.0f,
+        -1.0f, -1.0f, 0.0f, 0.0f,
     };
     renderer_init(renderer);
     renderer_bind(renderer);
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 24,
-             &vertices[0], GL_STATIC_DRAW);
+    glBufferData(
+        GL_ARRAY_BUFFER, sizeof(float) * 24,
+        &vertices[0], GL_STATIC_DRAW
+    );
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), NULL);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                          (void*)(2 * sizeof(float)));
+    glVertexAttribPointer(
+        1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+        (void*)(2 * sizeof(float))
+    );
 }
 
 void viewport_render_to_window(
@@ -831,15 +1031,94 @@ void viewport_render_to_window(
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     }
+    //TODO: make use of viewport screen_pos (apply matrix / offset in shader)
 
     glUseProgram(viewport_shader->id);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, viewport->frame_buffer_texture);
-    glUniform1i(glGetUniformLocation(viewport_shader->id, "viewportTexture"), 0);
+    glUniform1i(
+        glGetUniformLocation(viewport_shader->id, "viewportTexture"), 0
+    );
     glBindVertexArray(renderer->vao);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     if (viewport->has_blending)
         glDisable(GL_BLEND);
+}
+
+/* RECT TEX COORDS ************************************************************/
+//To avoid C's array weirdness we'll use a struct for tex_coords instead of an
+//array(as we would in e.g. Odin)
+typedef struct {
+    vec2 bottom_left, bottom_right, top_left, top_right;
+} Tex_Coords;
+
+typedef struct {
+    vec2 min, max;
+} Tex_Coords_Quad;
+
+const Tex_Coords RECT_DEFAULT_TEX_COORDS = (Tex_Coords){
+    .bottom_left = {0.0f, 0.0f},
+    .bottom_right = {1.0f, 0.0f},
+    .top_left = {0.0f, 1.0f},
+    .top_right = {1.0f, 1.0f},
+};
+
+Tex_Coords tex_coords_mul_float(
+    const Tex_Coords tex_coords,
+    const float factor
+) {
+    return (Tex_Coords){
+        .bottom_left = vec2_mul_float(tex_coords.bottom_left, factor),
+        .bottom_right = vec2_mul_float(tex_coords.bottom_right, factor),
+        .top_left = vec2_mul_float(tex_coords.top_left, factor),
+        .top_right = vec2_mul_float(tex_coords.top_right, factor),
+    };
+}
+
+Tex_Coords tex_coords_mul_vec2(
+    const Tex_Coords tex_coords,
+    const vec2 factor
+) {
+    return (Tex_Coords){
+        .bottom_left = vec2_mul_vec2(tex_coords.bottom_left, factor),
+        .bottom_right = vec2_mul_vec2(tex_coords.bottom_right, factor),
+        .top_left = vec2_mul_vec2(tex_coords.top_left, factor),
+        .top_right = vec2_mul_vec2(tex_coords.top_right, factor),
+    };
+}
+
+Tex_Coords tex_coords_add_vec2(
+    const Tex_Coords tex_coords,
+    const vec2 vec
+) {
+    return (Tex_Coords){
+        .bottom_left = vec2_add_vec2(tex_coords.bottom_left, vec),
+        .bottom_right = vec2_add_vec2(tex_coords.bottom_right, vec),
+        .top_left = vec2_add_vec2(tex_coords.top_left, vec),
+        .top_right = vec2_add_vec2(tex_coords.top_right, vec),
+    };
+}
+
+Tex_Coords tex_coords_sub_vec2(
+    const Tex_Coords tex_coords,
+    const vec2 vec
+) {
+    return (Tex_Coords){
+        .bottom_left = vec2_sub_vec2(tex_coords.bottom_left, vec),
+        .bottom_right = vec2_sub_vec2(tex_coords.bottom_right, vec),
+        .top_left = vec2_sub_vec2(tex_coords.top_left, vec),
+        .top_right = vec2_sub_vec2(tex_coords.top_right, vec),
+    };
+}
+
+Tex_Coords tex_coords_map_to_quad(
+    const Tex_Coords tex_coords,
+    const Tex_Coords_Quad* quad
+) {
+    const vec2 scale = vec2_sub_vec2(quad->max, quad->min);
+    return tex_coords_add_vec2(
+        tex_coords_mul_vec2(tex_coords, scale), quad->min
+    );
 }
 
 /* RECT RENDERING *************************************************************/
@@ -847,7 +1126,6 @@ void viewport_render_to_window(
     Instead of the previous 'single-buffer-partial-update-only-on-change'
     caching approach we're aiming for an immediate mode approach this time.
  */
-
 typedef struct {
     vec2 pos;
     vec2 size;
@@ -856,8 +1134,8 @@ typedef struct {
     //the vertices of the rect will be aligned relative to the pivot
     //value range 0-1, where 0 = left/bottom, 1 = right/top, {0.5,0.5} = center
     vec2 pivot;
-    //0 = Bottom-Left | 1 = Bottom-Right | 2 = Top-Right | 3 = Top-Left
-    vec2 tex_coords[4];
+    i32 texture_id;
+    Tex_Coords tex_coords;
 } Rect;
 
 typedef struct {
@@ -865,106 +1143,24 @@ typedef struct {
     size_t curr_len;
 } Rect_Buffer;
 
+void add_rect_to_buffer(Rect_Buffer* rect_buffer, const Rect rect) {
+    SDL_assert(rect_buffer->curr_len + 1 < RECT_BUFFER_CAPACITY);
+    rect_buffer->rects[rect_buffer->curr_len] = rect;
+    rect_buffer->curr_len += 1;
+}
+
+void add_rect_to_buffer_quadmap(
+    Rect_Buffer* rect_buffer,
+    Rect rect,
+    const Tex_Coords_Quad* quad
+) {
+    SDL_assert(quad != NULL);
+    rect.tex_coords = tex_coords_map_to_quad(rect.tex_coords, quad);
+    add_rect_to_buffer(rect_buffer, rect);
+}
+
 void reset_rect_buffer(Rect_Buffer* rect_buffer) {
     rect_buffer->curr_len = 0;
-}
-
-void render_text(
-    const char* text,
-    const Font* font,
-    const vec2 pos,
-    const vec3 color,
-    const float scale,
-    const float sort_order,
-    Rect_Buffer* rect_buffer
-) {
-    float x = 0, y = 0;
-    i32 glyph_iterator = 0;
-    const size_t text_len = SDL_strlen(text);
-    const vec2 adjusted_pos = pos;
-    //TODO: precalculate the text bounds and add vh centering functionality!
-
-    Rect rect = (Rect){
-        .color = color,
-        .pivot = {0.0f, 0.0f},
-        .sort_order = sort_order,
-    };
-
-    for (int i = 0; i < text_len; i++) {
-        const char c = text[i];
-        switch (c) {
-        case '\n':
-            x = 0;
-            y += FONT_SIZE;
-            continue;
-        case '\t':
-            x += FONT_TAB_SIZE;
-            continue;
-         case ' ':
-             x += FONT_SPACE_SIZE;
-             continue;
-        default: break;
-        }
-
-        stbtt_aligned_quad quad = {0};
-        stbtt_GetPackedQuad(font->char_data, FONT_TEXTURE_SIZE,
-                            FONT_TEXTURE_SIZE, (i32)c - FONT_UNICODE_START,
-                            &x, &y, &quad, true);
-
-        quad.x0 *= scale;
-        quad.x1 *= scale;
-        quad.y0 *= scale;
-        quad.y1 *= scale;
-
-        quad.x0 = quad.x0 + adjusted_pos.x;
-        quad.x1 = quad.x1 + adjusted_pos.x;
-        quad.y0 = -quad.y0 + adjusted_pos.y;
-        quad.y1 = -quad.y1 + adjusted_pos.y;
-
-        rect.pos = (vec2){quad.x0, quad.y1};
-        rect.size = (vec2){
-            SDL_fabsf(quad.x0 - quad.x1),
-            SDL_fabsf(quad.y0 - quad.y1)
-        };
-
-        rect.tex_coords[0] = (vec2){quad.s0, 1.0f - quad.t1};
-        rect.tex_coords[1] = (vec2){quad.s1, 1.0f - quad.t1};
-        rect.tex_coords[2] = (vec2){quad.s0, 1.0f - quad.t0};
-        rect.tex_coords[3] = (vec2){quad.s1, 1.0f - quad.t0};
-
-        rect_buffer->rects[rect_buffer->curr_len + glyph_iterator] = rect;
-        SDL_assert(
-            rect_buffer->curr_len + glyph_iterator < RECT_BUFFER_CAPACITY);
-        glyph_iterator += 1;
-    }
-
-    rect_buffer->curr_len += glyph_iterator;
-}
-
-//NOTE: This is highly ineffcient - it duplicates the glyphs 4 times, introducing
-//overdraw and vertex redundancy. A shader based solution would be better.
-void render_text_outlined(
-    const char* text,
-    const Font* font,
-    const vec2 pos,
-    const vec3 color,
-    const float scale,
-    float sort_order,
-    Rect_Buffer* rect_buffer,
-    const float outline_offset,
-    const vec3 outline_color
-) {
-    render_text(text, font, pos, color, scale, sort_order, rect_buffer);
-    sort_order -= 1.0f;
-
-    render_text(text, font, (vec2){pos.x + outline_offset, pos.y},
-        outline_color, scale, sort_order, rect_buffer);
-    render_text(text, font, (vec2){pos.x - outline_offset, pos.y},
-        outline_color, scale, sort_order, rect_buffer);
-    render_text(text, font, (vec2){pos.x,pos.y + outline_offset},
-        outline_color, scale, sort_order, rect_buffer);
-    render_text(text, font, (vec2){pos.x,pos.y - outline_offset},
-        outline_color, scale, sort_order, rect_buffer);
 }
 
 typedef struct {
@@ -973,6 +1169,7 @@ typedef struct {
     vec2 tex_coord;
     //Min-Val = 0
     float sort_order;
+    i32 texture_id;
 } Rect_Vertex;
 
 typedef struct {
@@ -989,30 +1186,37 @@ void build_rect_vertex_buffer(
     if (rect_buffer->curr_len == 0) return;
     for (int rect_index = 0; rect_index < rect_buffer->curr_len; rect_index++) {
         Rect rect = rect_buffer->rects[rect_index];
-        vec2 half_size = vec2_mul_float(rect.size, 0.5f);
         Rect_Vertex vertex = (Rect_Vertex){
             .color = rect.color,
             .sort_order = rect.sort_order,
+            .texture_id = rect.texture_id,
         };
         const vec2 pivot_offset = vec2_mul_vec2(rect.pivot, rect.size);
 
+        //Bottom Left
         vertex.pos = vec2_sub_vec2(rect.pos, pivot_offset);
-        vertex.tex_coord = rect.tex_coords[0];
+        vertex.tex_coord = rect.tex_coords.bottom_left;
         const Rect_Vertex bottom_left = vertex;
 
+        //Bottom Right
         vertex.pos = vec2_sub_vec2(
-            vec2_add_vec2(rect.pos, (vec2){rect.size.x, 0}), pivot_offset);
-        vertex.tex_coord = rect.tex_coords[1];
+            vec2_add_vec2(rect.pos, (vec2){rect.size.x, 0}), pivot_offset
+        );
+        vertex.tex_coord = rect.tex_coords.bottom_right;
         const Rect_Vertex bottom_right = vertex;
 
+        //Top Left
         vertex.pos = vec2_sub_vec2(
-            vec2_add_vec2(rect.pos, (vec2){0, rect.size.y}), pivot_offset);
-        vertex.tex_coord = rect.tex_coords[2];
+            vec2_add_vec2(rect.pos, (vec2){0, rect.size.y}), pivot_offset
+        );
+        vertex.tex_coord = rect.tex_coords.top_left;
         const Rect_Vertex top_left = vertex;
 
+        //Top Right
         vertex.pos = vec2_sub_vec2(
-            vec2_add_vec2(rect.pos, rect.size), pivot_offset);
-        vertex.tex_coord = rect.tex_coords[3];
+            vec2_add_vec2(rect.pos, rect.size), pivot_offset
+        );
+        vertex.tex_coord = rect.tex_coords.top_right;
         const Rect_Vertex top_right = vertex;
 
         //this can be improved to avoid vertex redundancy using an EBO
@@ -1041,8 +1245,254 @@ void draw_rects(
         GL_ARRAY_BUFFER,
         0,
         (GLsizeiptr)(sizeof(Rect_Vertex) * vertex_buffer->curr_len),
-        &vertex_buffer->vertices[0]);
+        &vertex_buffer->vertices[0]
+    );
     glDrawArrays(GL_TRIANGLES, 0, (GLsizei)vertex_buffer->curr_len);
+}
+
+/* TEXT RENDERING *************************************************************/
+void render_text(
+    const char* text,
+    const Font* font,
+    const vec2 pos,
+    const vec3 color,
+    const float scale,
+    const float sort_order,
+    Rect_Buffer* rect_buffer
+) {
+    float x = 0, y = 0;
+    i32 glyph_iterator = 0;
+    const size_t text_len = SDL_strlen(text);
+    const vec2 adjusted_pos = pos;
+    //TODO: precalculate the text bounds and add vh centering functionality!
+
+    SDL_assert(font->texture_type == FONT_TEXTURE_TYPE_ARRAY);
+
+    Rect rect = (Rect){
+        .color = color,
+        .pivot = {0.0f, 0.0f},
+        .sort_order = sort_order,
+        .texture_id = font->texture_id,
+    };
+
+    for (int i = 0; i < text_len; i++) {
+        const char c = text[i];
+        switch (c) {
+        case '\n':
+            x = 0;
+            y += FONT_SIZE;
+            continue;
+        case '\t':
+            x += FONT_TAB_SIZE;
+            continue;
+        case ' ':
+            x += FONT_SPACE_SIZE;
+            continue;
+        default: break;
+        }
+
+        stbtt_aligned_quad quad = {0};
+        stbtt_GetPackedQuad(
+            font->char_data, FONT_TEXTURE_SIZE,
+            FONT_TEXTURE_SIZE, (i32)c - FONT_UNICODE_START,
+            &x, &y, &quad, true
+        );
+
+        quad.x0 *= scale;
+        quad.x1 *= scale;
+        quad.y0 *= scale;
+        quad.y1 *= scale;
+
+        quad.x0 = quad.x0 + adjusted_pos.x;
+        quad.x1 = quad.x1 + adjusted_pos.x;
+        quad.y0 = -quad.y0 + adjusted_pos.y;
+        quad.y1 = -quad.y1 + adjusted_pos.y;
+
+        rect.pos = (vec2){quad.x0, quad.y1};
+        rect.size = (vec2){
+            SDL_fabsf(quad.x0 - quad.x1),
+            SDL_fabsf(quad.y0 - quad.y1)
+        };
+
+        rect.tex_coords.bottom_left = (vec2){quad.s0, 1.0f - quad.t1};
+        rect.tex_coords.bottom_right = (vec2){quad.s1, 1.0f - quad.t1};
+        rect.tex_coords.top_left = (vec2){quad.s0, 1.0f - quad.t0};
+        rect.tex_coords.top_right = (vec2){quad.s1, 1.0f - quad.t0};
+
+        SDL_assert(
+            rect_buffer->curr_len + glyph_iterator <
+            RECT_BUFFER_CAPACITY
+        );
+        rect_buffer->rects[rect_buffer->curr_len + glyph_iterator] = rect;
+        glyph_iterator += 1;
+    }
+
+    rect_buffer->curr_len += glyph_iterator;
+}
+
+//NOTE: This is highly ineffcient - it duplicates the glyphs 4 times, introducing
+//overdraw and vertex redundancy. A shader based solution would be better.
+void render_text_outlined(
+    const char* text,
+    const Font* font,
+    const vec2 pos,
+    const vec3 color,
+    const float scale,
+    float sort_order,
+    Rect_Buffer* rect_buffer,
+    const float outline_offset,
+    const vec3 outline_color
+) {
+    render_text(text, font, pos, color, scale, sort_order, rect_buffer);
+    sort_order -= 1.0f;
+
+    render_text(
+        text, font, (vec2){pos.x + outline_offset, pos.y},
+        outline_color, scale, sort_order, rect_buffer
+    );
+    render_text(
+        text, font, (vec2){pos.x - outline_offset, pos.y},
+        outline_color, scale, sort_order, rect_buffer
+    );
+    render_text(
+        text, font, (vec2){pos.x, pos.y + outline_offset},
+        outline_color, scale, sort_order, rect_buffer
+    );
+    render_text(
+        text, font, (vec2){pos.x, pos.y - outline_offset},
+        outline_color, scale, sort_order, rect_buffer
+    );
+}
+
+/* NINE SLICE *****************************************************************/
+typedef struct {
+    float total_size;
+    float border_size;
+    Tex_Coords_Quad quad;
+} Nine_Slice;
+
+void render_nine_slice(
+    Rect_Buffer* rect_buffer,
+    const vec2 pos,
+    const vec2 size,
+    const vec3 color,
+    const float sort_order,
+    const i32 texture_id,
+    const Nine_Slice* nine_slice
+) {
+    const vec2 half_size = vec2_mul_float(size, .5f);
+    const vec2 border_size = (vec2){
+        nine_slice->border_size,
+        nine_slice->border_size
+    };
+    const float bs_normalized = nine_slice->border_size / nine_slice->
+        total_size;
+
+    Rect rect = (Rect){
+        .color = color,
+        .size = border_size,
+        .sort_order = sort_order,
+        .texture_id = texture_id,
+    };
+    //TODO: assert for size < border_size
+
+    //bottom left
+    rect.pivot = (vec2){0.f, 0.f};
+    rect.pos = vec2_sub_vec2(pos, half_size);
+    rect.tex_coords = tex_coords_mul_float(
+        RECT_DEFAULT_TEX_COORDS,
+        bs_normalized
+    );
+    add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+
+    //bottom right
+    rect.pos = vec2_add_vec2(rect.pos, (vec2){size.x, 0});
+    rect.pivot = (vec2){1.f, 0.f};
+    rect.tex_coords = tex_coords_add_vec2(
+        rect.tex_coords,
+        (vec2){1.f - bs_normalized, 0.f}
+    );
+    add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+
+    //top right
+    rect.pos = vec2_add_vec2(rect.pos, (vec2){0, size.y});
+    rect.pivot = (vec2){1.f, 1.f};
+    rect.tex_coords = tex_coords_add_vec2(
+        rect.tex_coords,
+        (vec2){0.f, 1.f - bs_normalized}
+    );
+    add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+
+    //top left
+    rect.pos = vec2_sub_vec2(rect.pos, (vec2){size.x, 0.f});
+    rect.pivot = (vec2){0.f, 1.f};
+    rect.tex_coords = tex_coords_sub_vec2(
+        rect.tex_coords,
+        (vec2){1.f - bs_normalized, 0.f}
+    );
+    add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+
+    //bottom
+    rect.pos = vec2_sub_vec2(pos, (vec2){0, half_size.y});
+    rect.pivot = (vec2){.5f, 0.f};
+    rect.size = (vec2){
+        size.x - nine_slice->border_size * 2.f,
+        nine_slice->border_size,
+    };
+    rect.tex_coords = (Tex_Coords){
+        .bottom_left = (vec2){bs_normalized, 0.f},
+        .bottom_right = (vec2){1.f - bs_normalized, 0.f},
+        .top_left = (vec2){bs_normalized, bs_normalized},
+        .top_right = (vec2){1.f - bs_normalized, bs_normalized},
+    };
+    add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+
+    //top
+    rect.pos = vec2_add_vec2(pos, (vec2){0, half_size.y});
+    rect.pivot = (vec2){.5f, 1.f};
+    rect.tex_coords = tex_coords_add_vec2(
+        rect.tex_coords, (vec2){
+            0.f, 1.f - bs_normalized,
+        }
+    );
+    add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+
+    //left
+    rect.pos = vec2_sub_vec2(pos, (vec2){half_size.x, 0.f});
+    rect.pivot = (vec2){0.f, 0.5f};
+    rect.size = (vec2){
+        nine_slice->border_size,
+        size.y - nine_slice->border_size * 2.f,
+    };
+    rect.tex_coords = (Tex_Coords){
+        .bottom_left = (vec2){0.f, bs_normalized},
+        .bottom_right = (vec2){bs_normalized, bs_normalized},
+        .top_left = (vec2){0.f, 1.f - bs_normalized},
+        .top_right = (vec2){bs_normalized, 1.f - bs_normalized},
+    };
+    add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+
+    //right
+    rect.pos = vec2_add_vec2(pos, (vec2){half_size.x, 0.f});
+    rect.pivot = (vec2){1.f, 0.5f};
+    rect.tex_coords = tex_coords_add_vec2(
+        rect.tex_coords, (vec2){
+            1.f - bs_normalized, 0.f
+        }
+    );
+    add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+
+    //center
+    rect.pos = pos;
+    rect.size = vec2_sub_float(size, nine_slice->border_size * 2.f);
+    rect.pivot = (vec2){.5f, .5f};
+    rect.tex_coords = (Tex_Coords){
+        .bottom_left = {bs_normalized, bs_normalized},
+        .bottom_right = {1.f - bs_normalized, bs_normalized},
+        .top_left = {bs_normalized, 1.f - bs_normalized},
+        .top_right = {1.f - bs_normalized, 1.f - bs_normalized},
+    };
+    add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
 }
 
 /* APP ************************************************************************/
@@ -1063,6 +1513,7 @@ typedef struct {
     Viewport viewport_ui;
     Renderer viewport_renderer;
     Shader_Program viewport_shader;
+    GL_Texture_Array texture_array;
 } App;
 
 static App default_app() {
@@ -1078,24 +1529,43 @@ static App default_app() {
 
 static bool app_init(App* app) {
     asset_path_init(&app->asset_path);
-    const char* font1_path = temp_path_append(app->asset_path.str,
-        "Born2bSportyV2.ttf");
-    if (!font_load(font1_path, &app->font1))return false;
-    const char* font2_path = temp_path_append(app->asset_path.str,"tiny.ttf");
-    if (!font_load(font2_path, &app->font2))return false;
+
+    const Raw_Texture* raw_textures[] = {
+        font_load_for_array(
+            temp_path_append(app->asset_path.str, "Born2bSportyV2.ttf"),
+            &app->font1
+        ),
+        font_load_for_array(
+            temp_path_append(app->asset_path.str, "tiny.ttf"), &app->font2
+        ),
+        raw_texture_from_file(
+            temp_path_append(app->asset_path.str, "nine_slice_test.png")
+        ),
+    };
+    app->texture_array = gl_texture_array_generate(
+        &raw_textures[0], 3,
+        128, 128, 4, TEXTURE_CONFIG_DEFAULT, true
+    );
 
     app->test_shader = compile_shader_program(
-        test_shader_vert, test_shader_frag);
+        test_shader_vert, test_shader_frag
+    );
     app->rect_shader = compile_shader_program(
-        rect_shader_vert, rect_shader_frag);
+        rect_shader_vert, rect_shader_frag
+    );
     app->viewport_shader = compile_shader_program(
-        viewport_shader_vert, viewport_shader_frag);
+        viewport_shader_vert, viewport_shader_frag
+    );
 
     viewport_renderer_init(&app->viewport_renderer);
-    viewport_generate(&app->viewport_game,
-        (ivec2){app->window.width, app->window.height});
-    viewport_generate(&app->viewport_ui,
-        (ivec2){app->window.width, app->window.height});
+    viewport_generate(
+        &app->viewport_game,
+        (ivec2){app->window.width, app->window.height}
+    );
+    viewport_generate(
+        &app->viewport_ui,
+        (ivec2){app->window.width, app->window.height}
+    );
 
     renderer_init(&app->test_renderer);
     renderer_bind(&app->test_renderer);
@@ -1106,32 +1576,50 @@ static bool app_init(App* app) {
         -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f,
     };
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 18,
-                 &vertices[0], GL_STATIC_DRAW);
+    glBufferData(
+        GL_ARRAY_BUFFER, sizeof(float) * 18,
+        &vertices[0], GL_STATIC_DRAW
+    );
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT,GL_FALSE, 6 * sizeof(float), NULL);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT,GL_FALSE, 6 * sizeof(float),
-                          (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(
+        1, 3, GL_FLOAT,GL_FALSE, 6 * sizeof(float),
+        (void*)(3 * sizeof(float))
+    );
 
     renderer_init(&app->rect_renderer);
     renderer_bind(&app->rect_renderer);
     const GLsizei rect_vertex_size = sizeof(Rect_Vertex);
     glBufferData(
         GL_ARRAY_BUFFER, rect_vertex_size * RECT_VERTEX_BUFFER_CAPACITY,
-        NULL, GL_STATIC_DRAW);
+        NULL, GL_STATIC_DRAW
+    );
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, rect_vertex_size,
-                          (void*)offsetof(Rect_Vertex, pos));
+    glVertexAttribPointer(
+        0, 2, GL_FLOAT, GL_FALSE, rect_vertex_size,
+        (void*)offsetof(Rect_Vertex, pos)
+    );
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, rect_vertex_size,
-                          (void*)offsetof(Rect_Vertex, color));
+    glVertexAttribPointer(
+        1, 3, GL_FLOAT, GL_FALSE, rect_vertex_size,
+        (void*)offsetof(Rect_Vertex, color)
+    );
     glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, rect_vertex_size,
-                          (void*)offsetof(Rect_Vertex, tex_coord));
+    glVertexAttribPointer(
+        2, 2, GL_FLOAT, GL_FALSE, rect_vertex_size,
+        (void*)offsetof(Rect_Vertex, tex_coord)
+    );
     glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, rect_vertex_size,
-                          (void*)offsetof(Rect_Vertex, sort_order));
+    glVertexAttribPointer(
+        3, 1, GL_FLOAT, GL_FALSE, rect_vertex_size,
+        (void*)offsetof(Rect_Vertex, sort_order)
+    );
+    glEnableVertexAttribArray(4);
+    glVertexAttribIPointer(
+        4, 1, GL_INT, rect_vertex_size,
+        (void*)offsetof(Rect_Vertex, texture_id)
+    );
 
     return true;
 }
@@ -1140,7 +1628,6 @@ static void app_tick(App* app) {
     app->game.player.pos_x = app->mouse.pos_x;
     app->game.player.pos_y = app->mouse.pos_y;
 }
-
 
 static void app_draw(App* app) {
     /* GAME *******************************************************************/
@@ -1156,10 +1643,10 @@ static void app_draw(App* app) {
     reset_rect_buffer(&app->rect_buffer);
 
     //Rects
-    const float viewport_width  = (float) app->viewport_ui.frame_buffer_size.x;
-    const float viewport_height = (float) app->viewport_ui.frame_buffer_size.y;
-    const float window_width    = (float) app->window.width;
-    const float window_height   = (float) app->window.height;
+    const float viewport_width = (float)app->viewport_ui.frame_buffer_size.x;
+    const float viewport_height = (float)app->viewport_ui.frame_buffer_size.y;
+    const float window_width = (float)app->window.width;
+    const float window_height = (float)app->window.height;
 
     const float font_scale = 1.f;
     //this approach would allow for consistent font size among all viewport
@@ -1174,83 +1661,80 @@ static void app_draw(App* app) {
         font,
         (vec2){
             (app->mouse.pos_x / window_width) * viewport_width,
-            viewport_height - (app->mouse.pos_y / window_height) * viewport_height,
+            viewport_height - (app->mouse.pos_y / window_height) *
+            viewport_height,
         },
         COLOR_WHITE,
-        font_scale, 0.0f, &app->rect_buffer);
+        font_scale, 0.0f, &app->rect_buffer
+    );
     render_text(
         "This is another line!",
         font,
         (vec2){
-            viewport_width  * .5f,
+            viewport_width * .5f,
             viewport_height * .5f + FONT_SIZE * 1.5f,
         },
         COLOR_RED,
-        font_scale, 0.0f, &app->rect_buffer);
-    render_text_outlined(
-        "+1234567890 # HP!",
-        font,
+        font_scale, 0.0f, &app->rect_buffer
+    );
+
+    const Nine_Slice nine_slice = {
+        .total_size = 32.f,
+        .border_size = 10.f,
+        .quad = {
+            .min = (vec2){0.f, .75f},
+            .max = (vec2){.25f, 1.f},
+        }
+    };
+    render_nine_slice(
+        &app->rect_buffer,
         (vec2){
-            viewport_width  * .5f,
-            viewport_height * .5f + FONT_SIZE * 3.f,
+            viewport_width * .75f + viewport_width * .25f * 0.5f,
+            viewport_height * .5f
         },
-        COLOR_GREEN,
-        ((SDL_sinf((float)SDL_GetTicks() * 0.125f * DELTA_TIME) + 1.0f)/2.0f) * 4.5f, 1.0f,
-        &app->rect_buffer, 1.5f, COLOR_MAGENTA);
-    render_text_outlined(
-        "!@#$%^&*()-+./,",
-        font,
-        (vec2){
-            viewport_width  * .5f,
-            viewport_height * .5f + FONT_SIZE * 4.5f,
-        },
-        COLOR_BLUE,
-        font_scale, 1.0f, &app->rect_buffer, 1.0f, COLOR_WHITE);
-    render_text(
-        "UPPERCASE LINE!",
-        font,
-        (vec2){
-            viewport_width  * .5f,
-            viewport_height * .5f + FONT_SIZE * 6.f,
-        },
-        COLOR_YELLOW,
-        font_scale, 0.0f, &app->rect_buffer);
-    render_text_outlined(
-        "BIG UPPERCASE LINE!\nHello My friend!~",
-        font,
-        (vec2){
-            viewport_width  * .125f,
-            viewport_height * .5f + FONT_SIZE * 8.f,
-        },
-        COLOR_MAGENTA,
-        font_scale * 1.5f, 1.0f, &app->rect_buffer, 1.0f, COLOR_WHITE);
+        (vec2){viewport_width * .25f, viewport_height},
+        COLOR_RED,
+        0.f,
+        2,
+        &nine_slice
+    );
 
     build_rect_vertex_buffer(&app->rect_buffer, &app->rect_vertex_buffer);
     glUseProgram(app->rect_shader.id);
     const mat4 ortho_mat = mat4_ortho(
-        0.f, viewport_width, 0.f, viewport_height, -1.f, 1.f);
+        0.f, viewport_width, 0.f, viewport_height, RECT_MIN_SORT_ORDER,
+        RECT_MAX_SORT_ORDER
+    );
     const i32 projection_loc = glGetUniformLocation(
-        app->rect_shader.id, "projection");
-    glUniformMatrix4fv(projection_loc, 1, GL_FALSE,
-                       (const GLfloat*)(&ortho_mat.matrix[0]));
-    const i32 texture_loc = glGetUniformLocation(
-        app->rect_shader.id, "textureSampler");
-    glUniform1i(texture_loc, 0);
-    gl_texture_bind(&font->texture, 0);
+        app->rect_shader.id, "projection"
+    );
+    glUniformMatrix4fv(
+        projection_loc, 1, GL_FALSE,
+        (const GLfloat*)(&ortho_mat.matrix[0])
+    );
+    const i32 texture_array_loc = glGetUniformLocation(
+        app->rect_shader.id, "textureArray"
+    );
+    glUniform1i(texture_array_loc, 0);
+    gl_texture_array_bind(&app->texture_array, 0);
     const i32 loc_alpha_clip_threshold = glGetUniformLocation(
-        app->rect_shader.id, "alphaClipThreshold");
+        app->rect_shader.id, "alphaClipThreshold"
+    );
     glUniform1f(loc_alpha_clip_threshold, 0.5f);
     draw_rects(&app->rect_vertex_buffer, &app->rect_renderer);
-
 
     /* SCREEN *****************************************************************/
     viewport_unbind(app->window.width, app->window.height);
 
-    viewport_render_to_window(&app->viewport_game, &app->viewport_renderer,
-        &app->viewport_shader);
+    viewport_render_to_window(
+        &app->viewport_game, &app->viewport_renderer,
+        &app->viewport_shader
+    );
 
-    viewport_render_to_window(&app->viewport_ui, &app->viewport_renderer,
-        &app->viewport_shader);
+    viewport_render_to_window(
+        &app->viewport_ui, &app->viewport_renderer,
+        &app->viewport_shader
+    );
 
     SDL_GL_SwapWindow(app->window.sdl);
 }
@@ -1261,6 +1745,7 @@ static void app_cleanup(App* app) {
     delete_shader_program(&app->viewport_shader);
     font_delete(&app->font1);
     font_delete(&app->font2);
+    texture_array_free(&app->texture_array);
     viewport_cleanup(&app->viewport_game);
     viewport_cleanup(&app->viewport_ui);
     renderer_cleanup(&app->test_renderer);
@@ -1271,6 +1756,7 @@ static void app_cleanup(App* app) {
         SDL_DestroyWindow(app->window.sdl);
     SDL_free(app);
 }
+
 static void app_event_mouse_down(
     const App* app,
     const SDL_MouseButtonEvent event
@@ -1322,7 +1808,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
     if (!SDL_SetAppMetadata(
             APP_TITLE,
             APP_VERSION,
-            APP_IDENTIFIER)
+            APP_IDENTIFIER
+        )
     ) {
         SDL_Log("Failed to set SDL AppMetadata: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
@@ -1361,8 +1848,10 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
 #else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
-                        SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(
+        SDL_GL_CONTEXT_PROFILE_MASK,
+        SDL_GL_CONTEXT_PROFILE_CORE
+    );
 #endif
     //TODO: test if OPENGL_FORWARD_COMPAT is required for mac with sdl
 
@@ -1438,10 +1927,14 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
         );
         app->window.width = event->window.data1;
         app->window.height = event->window.data2;
-        viewport_generate(&app->viewport_game,
-            (ivec2){app->window.width, app->window.height});
-        viewport_generate(&app->viewport_ui,
-            (ivec2){app->window.width, app->window.height});
+        viewport_generate(
+            &app->viewport_game,
+            (ivec2){app->window.width, app->window.height}
+        );
+        viewport_generate(
+            &app->viewport_ui,
+            (ivec2){app->window.width, app->window.height}
+        );
         break;
 
     case SDL_EVENT_KEY_DOWN:
