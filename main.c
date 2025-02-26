@@ -27,6 +27,7 @@
 *******************************************************************************/
 
 #define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
 #include "third-party/stb/stb_image.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -118,7 +119,7 @@ const char* rect_shader_frag =
 	"in vec3 Color;\n"
 	"flat in int TextureId;\n"
 	"out vec4 FragColor;\n"
-	"uniform sampler2DArray textureArray;\n"
+	"uniform mediump sampler2DArray textureArray;\n"
 	"uniform float alphaClipThreshold;\n"
 	"void main() {\n"
 	"    //TODO: Find out how stb_tt deals with the y-axis for the glyphs. For now we'll simply hardcode the flip here\n"
@@ -207,6 +208,7 @@ typedef struct {
 	float x, y, z;
 } vec3;
 
+//NOTE: this violates ISO C99's unnamed structs/unions rule!
 typedef struct {
 	union {
 		struct {
@@ -290,8 +292,8 @@ float float_lerp(const float a, const float b, const float t) {
 	return (1 - t) * a + t * b;
 }
 
-vec3 vec2_lerp(const vec2 a, const vec2 b, const float t) {
-	return (vec3){
+vec2 vec2_lerp(const vec2 a, const vec2 b, const float t) {
+	return (vec2){
 		float_lerp(a.x, b.x, t),
 		float_lerp(a.y, b.y, t),
 	};
@@ -408,13 +410,13 @@ typedef struct {
 	bool gamma_correction;
 } Texture_Config;
 
-Texture_Config TEXTURE_CONFIG_DEFAULT = (Texture_Config){
+const Texture_Config TEXTURE_CONFIG_DEFAULT = (Texture_Config){
 	.filter = false,
 	.repeat = true,
 	.gamma_correction = false,
 };
 
-Texture_Config TEXTURE_CONFIG_DEFAULT_GAMMACORRECT = (Texture_Config){
+const Texture_Config TEXTURE_CONFIG_DEFAULT_GAMMACORRECT = (Texture_Config){
 	.filter = false,
 	.repeat = true,
 	.gamma_correction = true,
@@ -672,7 +674,7 @@ typedef struct {
 	union {
 		GL_Texture texture;
 		i32 texture_id;
-	};
+	} texture_union;
 } Font;
 
 //Loads the ttf, packs the glyphs it to an atlas and generates a rgba texture
@@ -730,7 +732,7 @@ bool font_load_single(const char* file_path, Font* font) {
 		return false;
 
 	font->texture_type = FONT_TEXTURE_TYPE_SINGLE;
-	font->texture = gl_texture_from_raw_texture(
+	font->texture_union.texture = gl_texture_from_raw_texture(
 		raw_texture, TEXTURE_CONFIG_DEFAULT
 	);
 	raw_texture_free(raw_texture);
@@ -747,7 +749,7 @@ Raw_Texture* font_load_for_array(const char* file_path, Font* font) {
 void font_delete(const Font* font) {
 	SDL_assert(font != NULL);
 	if (font->texture_type == FONT_TEXTURE_TYPE_SINGLE) {
-		gl_texture_delete(&font->texture);
+		gl_texture_delete(&font->texture_union.texture);
 	}
 }
 
@@ -1184,7 +1186,7 @@ void build_rect_vertex_buffer(
 	size_t vertex_index = 0;
 	vertex_buffer->curr_len = 0;
 	if (rect_buffer->curr_len == 0) return;
-	for (int rect_index = 0; rect_index < rect_buffer->curr_len; rect_index++) {
+	for (size_t rect_index = 0; rect_index < rect_buffer->curr_len; rect_index++) {
 		Rect rect = rect_buffer->rects[rect_index];
 		Rect_Vertex vertex = (Rect_Vertex){
 			.color = rect.color,
@@ -1261,7 +1263,7 @@ void render_text(
 	Rect_Buffer* rect_buffer
 ) {
 	float x = 0, y = 0;
-	i32 glyph_iterator = 0;
+	size_t glyph_iterator = 0;
 	const size_t text_len = SDL_strlen(text);
 	const vec2 adjusted_pos = pos;
 	//TODO: precalculate the text bounds and add vh centering functionality!
@@ -1272,10 +1274,10 @@ void render_text(
 		.color = color,
 		.pivot = {0.0f, 0.0f},
 		.sort_order = sort_order,
-		.texture_id = font->texture_id,
+		.texture_id = font->texture_union.texture_id,
 	};
 
-	for (int i = 0; i < text_len; i++) {
+	for (size_t i = 0; i < text_len; i++) {
 		const char c = text[i];
 		switch (c) {
 		case '\n':
@@ -1530,7 +1532,7 @@ static App default_app() {
 static bool app_init(App* app) {
 	asset_path_init(&app->asset_path);
 
-	const Raw_Texture* raw_textures[] = {
+	Raw_Texture* raw_textures[] = {
 		font_load_for_array(
 			temp_path_append(app->asset_path.str, "Born2bSportyV2.ttf"),
 			&app->font1

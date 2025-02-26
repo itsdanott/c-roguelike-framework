@@ -21,15 +21,20 @@ endif()
 
 add_subdirectory(third-party/glad-3.3core-3.0es)
 
-#add_compile_options(-Wall -Werror -Wpedantic)
-#add_compile_options(-Wextra -Wconversion)
-add_compile_options(-Werror=vla)
-
 add_executable(c_roguelike_framework
     main.c
     third-party/stb/stb_truetype.h
     third-party/stb/stb_image.h
 )
+
+#target_compile_options(c_roguelike_framework PRIVATE
+#        -Wall
+#        -Werror
+#        -Wextra
+#        -Wconversion
+#        -Wpedantic
+#        -Werror=vla
+#)
 
 target_link_libraries(c_roguelike_framework PRIVATE
         SDL3::SDL3
