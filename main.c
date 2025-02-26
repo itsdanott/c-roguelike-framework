@@ -53,19 +53,23 @@ const char* APP_TITLE = "ROGUELIKE GAME";
 const char* APP_VERSION = "0.1.0";
 const char* APP_IDENTIFIER = "com.otone.roguelike";
 
-#define SDL_WINDOW_WIDTH  800
-#define SDL_WINDOW_HEIGHT 600
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+#define SDL_WINDOW_WIDTH  480
+#define SDL_WINDOW_HEIGHT 240
+#else
+#define SDL_WINDOW_WIDTH  640
+#define SDL_WINDOW_HEIGHT 480
+#endif
 
-#define TARGET_FPS 30
-const u64 TICK_RATE_IN_MS = (u64)(1.0f / (float)TARGET_FPS * 1000.0f);
-const float DELTA_TIME = (float)TICK_RATE_IN_MS / 1000.0f;
+const u64 TICK_RATE_IN_MS = 16;
+const float DELTA_TIME = (float)TICK_RATE_IN_MS / SDL_MS_PER_SECOND;
 
 //FONT_SIZE-Values for 128px FONT_TEXTURE_SIZE
 //16 - Born2bSportyV2.ttf
 //18 - Tiny.ttf
 #define FONT_SIZE 16
 #define FONT_TEXTURE_SIZE 128
-#define FONT_TAB_SIZE 1.5f
+#define FONT_TAB_SIZE 6
 #define FONT_SPACE_SIZE 3
 //see https://en.wikipedia.org/wiki/List_of_Unicode_characters#Control_codes
 //for the entire Unicode range we use 96 characters
@@ -255,6 +259,25 @@ mat4 mat4_ortho(
     result.matrix[3][2] = -(z_far + z_near) / (z_far - z_near);
     result.matrix[3][3] = 1.0f;
     return result;
+}
+
+float float_lerp(const float a, const float b, const float t) {
+    return (1 - t) * a + t * b;
+}
+
+vec3 vec2_lerp(const vec2 a, const vec2 b, const float t) {
+    return (vec3){
+        float_lerp(a.x, b.x, t),
+        float_lerp(a.y, b.y, t),
+    };
+}
+
+vec3 vec3_lerp(const vec3 a, const vec3 b, const float t) {
+    return (vec3){
+        float_lerp(a.x, b.x, t),
+        float_lerp(a.y, b.y, t),
+        float_lerp(a.z, b.z, t),
+    };
 }
 
 /* COLORS *********************************************************************/
@@ -1118,9 +1141,8 @@ static void app_tick(App* app) {
     app->game.player.pos_y = app->mouse.pos_y;
 }
 
-static void app_draw(App* app) {
-    glClear(GL_COLOR_BUFFER_BIT);
 
+static void app_draw(App* app) {
     /* GAME *******************************************************************/
     viewport_bind(&app->viewport_game);
 
@@ -1249,6 +1271,19 @@ static void app_cleanup(App* app) {
         SDL_DestroyWindow(app->window.sdl);
     SDL_free(app);
 }
+static void app_event_mouse_down(
+    const App* app,
+    const SDL_MouseButtonEvent event
+) {
+    switch (event.button) {
+    case SDL_BUTTON_LEFT:
+    case SDL_BUTTON_RIGHT:
+    case SDL_BUTTON_MIDDLE:
+    case SDL_BUTTON_X1:
+    case SDL_BUTTON_X2:
+    default: return;
+    }
+}
 
 static void app_event_key_down(const App* app, const SDL_KeyboardEvent event) {
     switch (event.key) {
@@ -1370,11 +1405,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
  * for that).
  */
 SDL_AppResult SDL_AppIterate(void* appstate) {
-    App* app = (App*)appstate;
+    App* app = appstate;
     const u64 now = SDL_GetTicks();
-
     SDL_GetMouseState(&app->mouse.pos_x, &app->mouse.pos_y);
-
     while ((now - app->last_tick) >= TICK_RATE_IN_MS) {
         app_tick(app);
         app->last_tick += TICK_RATE_IN_MS;
@@ -1413,6 +1446,10 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 
     case SDL_EVENT_KEY_DOWN:
         app_event_key_down(app, event->key);
+        break;
+
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        app_event_mouse_down(app, event->button);
         break;
 
     case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
