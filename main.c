@@ -1516,6 +1516,7 @@ typedef struct {
 	Renderer viewport_renderer;
 	Shader_Program viewport_shader;
 	GL_Texture_Array texture_array;
+	bool has_focus;
 } App;
 
 static App default_app() {
@@ -1526,6 +1527,7 @@ static App default_app() {
 		},
 		.viewport_game = default_viewport_game(),
 		.viewport_ui = default_viewport_ui(),
+		.has_focus = false,
 	};
 }
 
@@ -1897,6 +1899,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
  */
 SDL_AppResult SDL_AppIterate(void* appstate) {
 	App* app = appstate;
+	if (!app->has_focus) return SDL_APP_CONTINUE;
+
 	const u64 now = SDL_GetTicks();
 	SDL_GetMouseState(&app->mouse.pos_x, &app->mouse.pos_y);
 	while ((now - app->last_tick) >= TICK_RATE_IN_MS) {
@@ -1953,6 +1957,15 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 
 	case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
 		app->window.fullscreen = false;
+		break;
+
+	case SDL_EVENT_WINDOW_FOCUS_GAINED:
+		app->has_focus = true;
+		app->last_tick = SDL_GetTicks();
+		break;
+
+	case SDL_EVENT_WINDOW_FOCUS_LOST:
+		app->has_focus = false;
 		break;
 
 	default: return SDL_APP_CONTINUE;
