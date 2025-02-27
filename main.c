@@ -1382,7 +1382,8 @@ void render_nine_slice(
 	const vec3 color,
 	const float sort_order,
 	const i32 texture_id,
-	const Nine_Slice* nine_slice
+	const Nine_Slice* nine_slice,
+	bool render_center
 ) {
 	const vec2 half_size = vec2_mul_float(size, .5f);
 	const vec2 border_size = (vec2){
@@ -1487,16 +1488,18 @@ void render_nine_slice(
 	add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
 
 	//center
-	rect.pos = pos;
-	rect.size = vec2_sub_float(size, nine_slice->border_size * 2.f);
-	rect.pivot = (vec2){.5f, .5f};
-	rect.tex_coords = (Tex_Coords){
-		.bottom_left = {bs_normalized, bs_normalized},
-		.bottom_right = {1.f - bs_normalized, bs_normalized},
-		.top_left = {bs_normalized, 1.f - bs_normalized},
-		.top_right = {1.f - bs_normalized, 1.f - bs_normalized},
-	};
-	add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+	if (render_center) {
+		rect.pos = pos;
+		rect.size = vec2_sub_float(size, nine_slice->border_size * 2.f);
+		rect.pivot = (vec2){.5f, .5f};
+		rect.tex_coords = (Tex_Coords){
+			.bottom_left = {bs_normalized, bs_normalized},
+			.bottom_right = {1.f - bs_normalized, bs_normalized},
+			.top_left = {bs_normalized, 1.f - bs_normalized},
+			.top_right = {1.f - bs_normalized, 1.f - bs_normalized},
+		};
+		add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
+	}
 }
 
 /* APP ************************************************************************/
@@ -1671,17 +1674,7 @@ static void app_draw(App* app) {
 			viewport_height,
 		},
 		COLOR_WHITE,
-		font_scale, 0.0f, &app->rect_buffer
-	);
-	render_text(
-		"This is another line!",
-		font,
-		(vec2){
-			viewport_width * .5f,
-			viewport_height * .5f + FONT_SIZE * 1.5f,
-		},
-		COLOR_RED,
-		font_scale, 0.0f, &app->rect_buffer
+		font_scale, 1.0f, &app->rect_buffer
 	);
 
 	const Nine_Slice nine_slice = {
@@ -1692,6 +1685,20 @@ static void app_draw(App* app) {
 			.max = (vec2){.25f, 1.f},
 		}
 	};
+
+	render_nine_slice(
+		&app->rect_buffer,
+		(vec2){
+			viewport_width* .5f,
+			viewport_height *.5f,
+		},
+		(vec2){viewport_width, viewport_height},
+		COLOR_RED,
+		0.f,
+		2,
+		&nine_slice,
+		false
+	);
 	render_nine_slice(
 		&app->rect_buffer,
 		(vec2){
@@ -1702,7 +1709,33 @@ static void app_draw(App* app) {
 		COLOR_RED,
 		0.f,
 		2,
-		&nine_slice
+		&nine_slice,
+		true
+	);
+	float h =font->size+nine_slice.border_size;
+	float px =viewport_width * .75f + viewport_width * .25f * 0.5f;
+	render_nine_slice(
+		&app->rect_buffer,
+		(vec2){
+			px,
+			viewport_height - h,
+		},
+		(vec2){viewport_width * .2f, h},
+		COLOR_WHITE,
+		0.5f,
+		2,
+		&nine_slice,
+		true
+		);
+	render_text(
+		"7DRL 2025",
+		font,
+		(vec2){
+			px-32.f,
+			viewport_height - h-nine_slice.border_size*.5f,
+		},
+		COLOR_YELLOW,
+		font_scale, 1.0f, &app->rect_buffer
 	);
 
 	build_rect_vertex_buffer(&app->rect_buffer, &app->rect_vertex_buffer);
@@ -1777,11 +1810,24 @@ static void app_event_mouse_down(
 	}
 }
 
-static void app_event_key_down(const App* app, const SDL_KeyboardEvent event) {
+static void app_event_key_down(App* app, const SDL_KeyboardEvent event) {
 	switch (event.key) {
 	case SDLK_SPACE:
 		SDL_GetWindowFullscreenMode(app->window.sdl);
 		SDL_SetWindowFullscreen(app->window.sdl, !app->window.fullscreen);
+		return;
+	case SDLK_MINUS:
+		if (app->viewport_ui.frame_buffer_divisor == 1) return;
+		app->viewport_ui.frame_buffer_divisor -= 1;
+		viewport_generate(
+			&app->viewport_ui, (ivec2){app->window.width, app->window.height}
+		);
+		return;
+	case SDLK_EQUALS:
+		app->viewport_ui.frame_buffer_divisor += 1;
+		viewport_generate(
+			&app->viewport_ui, (ivec2){app->window.width, app->window.height}
+		);
 		return;
 	default: return;
 	}
