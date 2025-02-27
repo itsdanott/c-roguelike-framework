@@ -68,7 +68,6 @@ const float DELTA_TIME = (float)TICK_RATE_IN_MS / SDL_MS_PER_SECOND;
 //FONT_SIZE-Values for 128px FONT_TEXTURE_SIZE
 //16 - Born2bSportyV2.ttf
 //18 - Tiny.ttf
-#define FONT_SIZE 16
 #define FONT_TEXTURE_SIZE 128
 #define FONT_TAB_SIZE 6
 #define FONT_SPACE_SIZE 3
@@ -671,6 +670,7 @@ typedef struct {
 	stbtt_packedchar char_data[FONT_UNICODE_RANGE];
 	Font_Texture_Type texture_type;
 
+	i32 size;
 	union {
 		GL_Texture texture;
 		i32 texture_id;
@@ -681,12 +681,10 @@ typedef struct {
 //If we will switch to texture arrays later on we'll need to split the logic.
 Raw_Texture* font_load_raw_texture(
 	const char* file_path,
-	Font* font
+	Font* font,
+	i32 size
 ) {
 	SDL_assert(font != NULL);
-
-	SDL_Log("Path: %s", file_path);
-
 	SDL_IOStream* io_stream = SDL_IOFromFile(file_path, "r");
 	size_t data_size = 0;
 	u8* file_data = SDL_LoadFile_IO(io_stream, &data_size, false);
@@ -707,8 +705,9 @@ Raw_Texture* font_load_raw_texture(
 		return NULL;
 	}
 
+	font->size = size;
 	if (!stbtt_PackFontRange(
-		&font->pack_context, file_data, 0, FONT_SIZE,
+		&font->pack_context, file_data, 0, size,
 		FONT_UNICODE_START, FONT_UNICODE_RANGE,
 		font->char_data
 	)) {
@@ -726,8 +725,8 @@ Raw_Texture* font_load_raw_texture(
 	return raw_texture;
 }
 
-bool font_load_single(const char* file_path, Font* font) {
-	Raw_Texture* raw_texture = font_load_raw_texture(file_path, font);
+bool font_load_single(const char* file_path, Font* font, const i32 size) {
+	Raw_Texture* raw_texture = font_load_raw_texture(file_path, font, size);
 	if (raw_texture == NULL)
 		return false;
 
@@ -740,9 +739,12 @@ bool font_load_single(const char* file_path, Font* font) {
 	return true;
 }
 
-Raw_Texture* font_load_for_array(const char* file_path, Font* font) {
-	Raw_Texture* raw_texture = font_load_raw_texture(file_path, font);
+Raw_Texture* font_load_for_array(
+	const char* file_path, Font* font, const i32 size,  const i32 texture_id
+) {
+	Raw_Texture* raw_texture = font_load_raw_texture(file_path, font, size);
 	font->texture_type = FONT_TEXTURE_TYPE_ARRAY;
+	font->texture_union.texture_id = texture_id;
 	return raw_texture;
 }
 
@@ -1282,7 +1284,7 @@ void render_text(
 		switch (c) {
 		case '\n':
 			x = 0;
-			y += FONT_SIZE;
+			y += font->size;
 			continue;
 		case '\t':
 			x += FONT_TAB_SIZE;
@@ -1537,10 +1539,10 @@ static bool app_init(App* app) {
 	Raw_Texture* raw_textures[] = {
 		font_load_for_array(
 			temp_path_append(app->asset_path.str, "Born2bSportyV2.ttf"),
-			&app->font1
+			&app->font1, 16, 0
 		),
 		font_load_for_array(
-			temp_path_append(app->asset_path.str, "tiny.ttf"), &app->font2
+			temp_path_append(app->asset_path.str, "tiny.ttf"), &app->font2, 18, 1
 		),
 		raw_texture_from_file(
 			temp_path_append(app->asset_path.str, "nine_slice_test.png")
