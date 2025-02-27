@@ -21,13 +21,17 @@ other.
 
 ## TODO
 - Arena allocator
-- replace sdl function defs with SDL ones to avoid C runtime library
+- replace stb function defs with SDL ones to avoid C runtime library
 - UI Layout persistence accross aspect ratios and resolutions
 - Textbox alignment(pivots)
+- Add miniaudio
+- Add FNL
 - Tilemap rendering
 - Game simulation
 
 ## Emscripten
+Run ```build-emscripten``` from the project root to build for web. 
+
 In order for the shell script to run properly make sure to add to path:
 - [Ninja](https://ninja-build.org/)
 - [emsdk](https://github.com/emscripten-core/emsdk)

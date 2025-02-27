@@ -22,9 +22,11 @@
 
 	TODO:
 		- Arena allocator
-		- replace sdl function defs with SDL ones to avoid C runtime library
+		- replace stb function defs with SDL ones to avoid C runtime library
 		- UI Layout persistence accross aspect ratios and resolutions
 		- Textbox alignment(pivots)
+		- Add miniaudio
+		- Add FNL
 		- Tilemap rendering
 		- Game simulation
 
