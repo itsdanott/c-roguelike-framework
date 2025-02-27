@@ -47,7 +47,9 @@ endif()
 if(EMSCRIPTEN)
     set_target_properties(c_roguelike_framework PROPERTIES
         SUFFIX ".html"
+        OUTPUT_NAME "index"
     )
+
     set(EMSCRIPTEN_LINK_FLAGS
         "-sMAX_WEBGL_VERSION=2"
         "--shell-file=${CMAKE_SOURCE_DIR}/third-party/emscripten/shell_minimal_modified.html"

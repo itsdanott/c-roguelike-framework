@@ -22,3 +22,34 @@ other.
 ## TODO
 - Arena allocator
 - replace sdl function defs with SDL ones to avoid C runtime library
+- UI Layout persistence accross aspect ratios and resolutions
+- Textbox alignment(pivots)
+- Tilemap rendering
+- Game simulation
+
+## Emscripten
+In order for the shell script to run properly make sure to add to path:
+- [Ninja](https://ninja-build.org/)
+- [emsdk](https://github.com/emscripten-core/emsdk)
+
+### Itch.io
+If you want to auto deploy to itch.io also add:
+- [butler](https://github.com/itchio/butler)
+
+to your PATH.
+
+After running ```butler login``` *once* you can auto deploy to itch.io simply by 
+appending this line to your build-emscripten script:
+```shell
+butler push .\bin-Emscripten\ user-name/project-name:channel-name
+```
+Or add a new ```build-deploy-itch``` script:
+
+Batch example:
+```batch
+call build-emscripten.bat
+cd ..
+call butler push .\bin-Emscripten\ user-name/project-name:channel-name
+```
+For more details see the [butler docs gitbook](https://itch.io/docs/butler/pushing.html) 
+

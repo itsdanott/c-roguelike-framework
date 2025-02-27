@@ -20,9 +20,13 @@
         - stb_truetype
         - FastNoise Lite
 
-    TODO:
-        - Arena allocator
-        - replace sdl func defs with SDL ones to avoid C runtime library
+	TODO:
+		- Arena allocator
+		- replace sdl function defs with SDL ones to avoid C runtime library
+		- UI Layout persistence accross aspect ratios and resolutions
+		- Textbox alignment(pivots)
+		- Tilemap rendering
+		- Game simulation
 
 *******************************************************************************/
 
