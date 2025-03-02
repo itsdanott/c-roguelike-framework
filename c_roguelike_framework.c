@@ -1,9 +1,16 @@
 /*
 * C ROGUELIKE FRAMEWORK ********************************************************
-    This is a lightweight C framework in preparation for 7drl 2025.
+
+	@@@		@@@		@		@@@
+	@		@ @		@		@
+	@		@@@		@		@@@
+	@@@		@  @	@@@		@
+
+	Lightweight C99 framework in preparation for 7drl 2025.
+
     It also serves as a learning project to get started with SDL3.
 
-    For simplicity, we use GL 3.3 core for all desktop platforms and GL ES 3.0
+	For simplicity, we use GL 3.3 core for all desktop platforms and GL ES 3.0
     for web as the feature set of these two gl versions is quite close to each
     other.
 
@@ -44,6 +51,10 @@
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+
+#include "c_roguelike_framework.h"
+
+#include "game/game.h"
 
 /* INTEGERS *******************************************************************/
 typedef Sint8 i8;
@@ -175,27 +186,6 @@ const char* FONT_PATH = "font-tiny/tiny.ttf";
 #define RECT_MAX_SORT_ORDER 128.f
 #define RECT_MIN_SORT_ORDER (-RECT_MAX_SORT_ORDER)
 
-/* MISC ***********************************************************************/
-typedef struct {
-	float pos_x;
-	float pos_y;
-} Player;
-
-typedef struct {
-	Player player;
-} Game;
-
-typedef struct {
-	float pos_x, pos_y;
-} Mouse;
-
-typedef struct {
-	SDL_Window* sdl;
-	SDL_GLContext gl_context;
-	i32 width, height;
-	bool fullscreen;
-} Window;
-
 /* MATH ***********************************************************************/
 typedef struct {
 	i32 x, y;
@@ -313,15 +303,16 @@ vec3 vec3_lerp(const vec3 a, const vec3 b, const float t) {
 }
 
 /* COLORS *********************************************************************/
-#define COLOR_RED       (vec3){1.00f,0.00f,0.00f}
-#define COLOR_GREEN     (vec3){0.00f,1.00f,0.00f}
-#define COLOR_BLUE      (vec3){0.00f,0.00f,1.00f}
-#define COLOR_YELLOW    (vec3){1.00f,1.00f,0.00f}
-#define COLOR_MAGENTA   (vec3){1.00f,0.00f,1.00f}
-#define COLOR_BLACK     (vec3){0.00f,0.00f,0.00f}
-#define COLOR_GRAY      (vec3){0.50f,0.50f,0.50f}
-#define COLOR_GRAY_DARK (vec3){0.25f,0.25f,0.25f}
-#define COLOR_WHITE     (vec3){1.00f,1.00f,1.00f}
+#define COLOR_RED			(vec3){1.00f,0.00f,0.00f}
+#define COLOR_GREEN			(vec3){0.00f,1.00f,0.00f}
+#define COLOR_BLUE			(vec3){0.00f,0.00f,1.00f}
+#define COLOR_YELLOW		(vec3){1.00f,1.00f,0.00f}
+#define COLOR_MAGENTA		(vec3){1.00f,0.00f,1.00f}
+#define COLOR_BLACK			(vec3){0.00f,0.00f,0.00f}
+#define COLOR_GRAY			(vec3){0.50f,0.50f,0.50f}
+#define COLOR_GRAY_BRIGHT	(vec3){0.75f,0.75f,0.75f}
+#define COLOR_GRAY_DARK		(vec3){0.25f,0.25f,0.25f}
+#define COLOR_WHITE			(vec3){1.00f,1.00f,1.00f}
 
 /* RENDERER *******************************************************************/
 typedef struct {
@@ -358,8 +349,7 @@ typedef struct {
 	char str[MAX_PATH_LEN];
 } Path;
 
-void asset_path_init(Path* asset_path) {
-	const char* base_path = SDL_GetBasePath();
+void asset_path_init(const char* base_path, Path* asset_path) {
 	const char* asset_str = "assets";
 	const size_t str_len = SDL_strlen(base_path) + SDL_strlen(asset_str) + 4;
 	SDL_assert(str_len < MAX_PATH_LEN);
@@ -454,6 +444,13 @@ Raw_Texture* raw_texture_rgba_from_single_channel(
 Raw_Texture* raw_texture_from_file(
 	const char* file_path
 ) {
+	SDL_PathInfo path_info;
+	if (!SDL_GetPathInfo(file_path, &path_info) || path_info.type !=
+	SDL_PATHTYPE_FILE) {
+		SDL_LogError(0,"Invalid Path: %s", SDL_GetError());
+		return NULL;
+	}
+
 	Raw_Texture* texture = SDL_malloc(sizeof(Raw_Texture));
 	*texture = (Raw_Texture){
 		.source = TEXTURE_RAW_SOURCE_STB_IMAGE,
@@ -688,16 +685,23 @@ typedef struct {
 Raw_Texture* font_load_raw_texture(
 	const char* file_path,
 	Font* font,
-	i32 size
+	const i32 size
 ) {
 	SDL_assert(font != NULL);
+	SDL_PathInfo path_info;
+	if (!SDL_GetPathInfo(file_path, &path_info) || path_info.type !=
+	SDL_PATHTYPE_FILE) {
+		SDL_LogError(0,"Invalid Path: %s", SDL_GetError());
+		return NULL;
+	}
+
 	SDL_IOStream* io_stream = SDL_IOFromFile(file_path, "r");
 	size_t data_size = 0;
 	u8* file_data = SDL_LoadFile_IO(io_stream, &data_size, false);
 	SDL_CloseIO(io_stream);
 	*font = (Font){0};
 	if (!stbtt_InitFont(&font->info, file_data, 0)) {
-		SDL_Log("Failed init font!");
+		SDL_LogError(0,"Failed init font!");
 		return NULL;
 	}
 
@@ -707,7 +711,7 @@ Raw_Texture* font_load_raw_texture(
 		FONT_TEXTURE_SIZE, FONT_TEXTURE_SIZE,
 		0, 1, NULL
 	)) {
-		SDL_Log("Failed to font pack begin!");
+		SDL_LogError(0,"Failed to font pack begin!");
 		return NULL;
 	}
 
@@ -717,7 +721,7 @@ Raw_Texture* font_load_raw_texture(
 		FONT_UNICODE_START, FONT_UNICODE_RANGE,
 		font->char_data
 	)) {
-		SDL_Log("Failed to pack font range!");
+		SDL_LogError(0,"Failed to pack font range!");
 		return NULL;
 	}
 
@@ -725,7 +729,7 @@ Raw_Texture* font_load_raw_texture(
 	SDL_free(file_data);
 
 	Raw_Texture* raw_texture = raw_texture_rgba_from_single_channel(
-		pixels, FONT_TEXTURE_SIZE,FONT_TEXTURE_SIZE
+		pixels, FONT_TEXTURE_SIZE, FONT_TEXTURE_SIZE
 	);
 
 	return raw_texture;
@@ -786,7 +790,7 @@ bool check_shader_compilation(const u32 shader) {
 	if (!success) {
 		char infoLog[512];
 		glGetShaderInfoLog(shader, 512, NULL, infoLog);
-		SDL_Log("shader compilation failed: %s", infoLog);
+		SDL_LogError(0,"shader compilation failed: %s", infoLog);
 		return false;
 	}
 
@@ -1508,6 +1512,250 @@ void render_nine_slice(
 	}
 }
 
+/* UI LAYOUT ******************************************************************/
+typedef struct {
+	vec2 pos;
+	vec2 size;
+	vec2 pivot;
+} Box_Layout;
+
+/* MOUSE **********************************************************************/
+typedef struct {
+	float pos_x, pos_y;
+} Mouse;
+
+/* WINDOW *********************************************************************/
+typedef struct {
+	SDL_Window* sdl;
+	SDL_GLContext gl_context;
+	i32 width, height;
+	bool fullscreen;
+} Window;
+
+/* HOT RELOADING **************************************************************/
+/*  For instant response while working on gameplay and ui this adds simple hot
+	reloading capabilities to debug builds.
+
+	It works like so:
+		0. Compile game lib as game.dll
+		1. Run the framework as a debug build
+		2. During initialization game.dll is duplicated to temp_game.dll
+		3. temp_game.dll is loaded
+		4. During app window focus gain game.dll is checked:
+		   whenever game.dll changes steps 2 and 3 are repeated
+
+	This prevents permission denied errors and allows for instant responsens to
+	changes in the gameplay code.
+*/
+
+#if defined(__DEBUG__)
+typedef bool (*Game_Init_Func)(CRLF_API*);
+typedef void (*Game_Tick_Func)(Game*);
+typedef void (*Game_Draw_Func)(Game*);
+typedef void (*Game_Cleanup_Func)(Game*);
+
+typedef struct {
+	Path lib_path;
+	Path temp_lib_path;
+	SDL_Time modify_time;
+	SDL_SharedObject* lib_obj;
+	Game_Init_Func game_init_func;
+	Game_Tick_Func game_tick_func;
+	Game_Draw_Func game_draw_func;
+	Game_Cleanup_Func game_cleanup_func;
+} Hot_Reload;
+
+//This copies the game lib to the temp lib in order to support hot reloading
+//(To avoid permission denied errors when re-compiling the game lib we need a
+//temp duplicate)
+bool duplicate_game_lib(
+	Hot_Reload* hot_reload
+) {
+	SDL_PathInfo path_info;
+	if (!SDL_GetPathInfo(hot_reload->lib_path.str, &path_info) || path_info.type
+	!= SDL_PATHTYPE_FILE) {
+		SDL_LogError(0, "Invalid game lib path: %s", SDL_GetError());
+		return false;
+	}
+
+	if (!SDL_CopyFile(
+		hot_reload->lib_path.str,
+		hot_reload->temp_lib_path.str)
+	) {
+		SDL_LogError(0, "Failed to copy temp game lib: %s", SDL_GetError());
+		return false;
+	}
+	hot_reload->modify_time = path_info.modify_time;
+	return true;
+}
+
+bool load_game_lib(
+	CRLF_API* api,
+	Game* game,
+	Hot_Reload* hot_reload
+) {
+	SDL_PathInfo path_info;
+	if (!SDL_GetPathInfo(hot_reload->lib_path.str, &path_info) || path_info
+		.type != SDL_PATHTYPE_FILE) {
+		SDL_LogError(0, "Invalid game lib path: %s", SDL_GetError());
+		return false;
+	}
+
+	if (path_info.modify_time <= hot_reload->modify_time) { return true; }
+
+	if (hot_reload->game_cleanup_func != NULL) {
+		hot_reload->game_cleanup_func(game);
+	}
+	SDL_UnloadObject(hot_reload->lib_obj);
+
+	if (!duplicate_game_lib(hot_reload))
+		return false;
+
+	hot_reload->modify_time = path_info.modify_time;
+	hot_reload->lib_obj = SDL_LoadObject(hot_reload->temp_lib_path.str);
+	if (hot_reload->lib_obj == NULL) {
+		SDL_LogError(0, "load game lib object: %s", SDL_GetError());
+		return false;
+	}
+
+	hot_reload->game_init_func = (Game_Init_Func)SDL_LoadFunction(
+		hot_reload->lib_obj, "game_init");
+	if (hot_reload->game_init_func == NULL) {
+		SDL_LogError(0, "load_game_lib: %s", SDL_GetError());
+		return false;
+	}
+
+	hot_reload->game_tick_func = (Game_Tick_Func)SDL_LoadFunction(
+		hot_reload->lib_obj, "game_tick");
+	if (hot_reload->game_tick_func == NULL) {
+		SDL_LogError(0, "load_game_lib: %s", SDL_GetError());
+		return false;
+	}
+
+	hot_reload->game_draw_func = (Game_Draw_Func)SDL_LoadFunction(
+		hot_reload->lib_obj, "game_draw");
+	if (hot_reload->game_draw_func == NULL) {
+		SDL_LogError(0, "load_game_lib: %s", SDL_GetError());
+		return false;
+	}
+
+	hot_reload->game_cleanup_func = (Game_Cleanup_Func)SDL_LoadFunction(
+		hot_reload->lib_obj, "game_cleanup");
+	if (hot_reload->game_cleanup_func == NULL) {
+		SDL_LogError(0, "load_game_lib: %s", SDL_GetError());
+		return false;
+	}
+
+	if (!hot_reload->game_init_func(api)) {
+		CRLF_LogError("Hot reload successful but game_init failed!");
+		return false;
+	}
+
+	CRLF_Log("Hot reload successful");
+	return true;
+}
+
+void hot_reload_init_lib_paths(
+	const char* base_path,
+	Path* lib_path,
+	Path* temp_lib_path
+) {
+	//NOTE: hard coded filename as this is only for development!
+	const char* lib_name =
+#if defined(SDL_PLATFORM_WIN32)
+	"game.dll";
+#elif defined(SDL_PLATFORM_APPLE)
+	"game.dylib";
+#elif defined (SDL_PLATFORM_LINUX)
+	"game.so";
+#else
+	#error("unsupported platform")
+#endif
+
+	//Base Path
+	{
+		const size_t str_len = SDL_strlen(base_path) + SDL_strlen(lib_name);
+		SDL_assert(str_len < MAX_PATH_LEN);
+		SDL_snprintf(lib_path->str, MAX_PATH_LEN, "%s%s", base_path, lib_name);
+		lib_path->length = SDL_strlen(lib_path->str);
+	}
+
+	//Temp Path
+	{
+		const char* temp_str = "temp_";
+		const size_t temp_str_len = SDL_strlen(base_path) + SDL_strlen(temp_str)
+			+ SDL_strlen(lib_name);
+		SDL_assert(temp_str_len < MAX_PATH_LEN);
+		SDL_snprintf(
+			temp_lib_path->str, MAX_PATH_LEN, "%s%s%s", base_path, temp_str,
+			lib_name
+		);
+		temp_lib_path->length = SDL_strlen(temp_lib_path->str);
+	}
+}
+
+bool hot_reload_init(
+	Hot_Reload* hot_reload,
+	const char* base_path,
+	CRLF_API* api,
+	Game* game
+) {
+	hot_reload_init_lib_paths(
+		base_path,
+		&hot_reload->lib_path,
+		&hot_reload->temp_lib_path
+	);
+
+	if (!duplicate_game_lib(hot_reload))
+		return false;
+
+	//Hacky way to force loading
+	hot_reload->modify_time = 0;
+
+	if (!load_game_lib(api, game, hot_reload))
+		return false;
+
+	return true;
+}
+
+void hot_reload_cleanup(const Hot_Reload* hot_reload) {
+	if (hot_reload == NULL) return;
+
+	if (hot_reload->lib_obj != NULL) {
+		SDL_UnloadObject(hot_reload->lib_obj);
+	}
+	//TODO: consider deleting the temp dll file
+}
+#endif
+
+/* PUBLIC API IMPLEMENTATION***************************************************/
+void CRLF_Log(const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	SDL_LogMessageV(
+		SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO, fmt, args
+	);
+	va_end(args);
+}
+
+void CRLF_LogWarning(const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	SDL_LogMessageV(
+		SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_WARN, fmt, args
+	);
+	va_end(args);
+}
+
+void CRLF_LogError(const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	SDL_LogMessageV(
+		SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_ERROR, fmt, args
+	);
+	va_end(args);
+}
+
 /* APP ************************************************************************/
 typedef struct {
 	Window window;
@@ -1528,6 +1776,10 @@ typedef struct {
 	Shader_Program viewport_shader;
 	GL_Texture_Array texture_array;
 	bool has_focus;
+	CRLF_API api;
+#if defined(__DEBUG__)
+	Hot_Reload hot_reload;
+#endif
 } App;
 
 static App default_app() {
@@ -1539,11 +1791,26 @@ static App default_app() {
 		.viewport_game = default_viewport_game(),
 		.viewport_ui = default_viewport_ui(),
 		.has_focus = false,
+		.api = (CRLF_API) {
+			.CRLF_Log = CRLF_Log,
+			.CRLF_LogError = CRLF_LogError,
+			.CRLF_LogWarning = CRLF_LogWarning,
+		},
+#if defined(__DEBUG__)
+		.hot_reload = {0},
+#endif
 	};
 }
 
 static bool app_init(App* app) {
-	asset_path_init(&app->asset_path);
+	const char* base_path = SDL_GetBasePath();
+	asset_path_init(base_path, &app->asset_path);
+#if defined(__DEBUG__)
+	if (!hot_reload_init(&app->hot_reload, base_path, &app->api, &app->game))
+		return false;
+#else
+	if (!game_init(&app->api)) return false;
+#endif
 
 	Raw_Texture* raw_textures[] = {
 		font_load_for_array(
@@ -1636,12 +1903,17 @@ static bool app_init(App* app) {
 		(void*)offsetof(Rect_Vertex, texture_id)
 	);
 
+	// SDL_Log("Game: %d", test_game());
+
 	return true;
 }
 
 static void app_tick(App* app) {
-	app->game.player.pos_x = app->mouse.pos_x;
-	app->game.player.pos_y = app->mouse.pos_y;
+#if defined(__DEBUG__)
+	app->hot_reload.game_tick_func(&app->game);
+#else
+	game_tick(&app->game);
+#endif
 }
 
 static void app_draw(App* app) {
@@ -1691,6 +1963,14 @@ static void app_draw(App* app) {
 			.max = (vec2){.25f, 1.f},
 		}
 	};
+	const Nine_Slice nine_slice_square = {
+		.total_size = 32.f,
+		.border_size = 10.f,
+		.quad = {
+			.min = (vec2){.25f, .75f},
+			.max = (vec2){.5f, 1.f},
+		}
+	};
 
 	render_nine_slice(
 		&app->rect_buffer,
@@ -1702,7 +1982,7 @@ static void app_draw(App* app) {
 		COLOR_RED,
 		0.f,
 		2,
-		&nine_slice,
+		&nine_slice_square,
 		false
 	);
 	render_nine_slice(
@@ -1785,6 +2065,10 @@ static void app_draw(App* app) {
 }
 
 static void app_cleanup(App* app) {
+#if defined(__DEBUG__)
+	hot_reload_cleanup(&app->hot_reload);
+#endif
+	delete_shader_program(&app->test_shader);
 	delete_shader_program(&app->test_shader);
 	delete_shader_program(&app->rect_shader);
 	delete_shader_program(&app->viewport_shader);
@@ -1869,18 +2153,18 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
 			APP_IDENTIFIER
 		)
 	) {
-		SDL_Log("Failed to set SDL AppMetadata: %s\n", SDL_GetError());
+		SDL_LogError(0,"Failed to set SDL AppMetadata: %s\n", SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
 
 	if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO)) {
-		SDL_Log("Failed to initialize SDL: %s\n", SDL_GetError());
+		SDL_LogError(0,"Failed to initialize SDL: %s\n", SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
 
 	App* app = SDL_malloc(sizeof(App));
 	if (app == NULL) {
-		SDL_Log("Failed to set allocate APP memory: %s\n", SDL_GetError());
+		SDL_LogError(0,"Failed to allocate APP memory: %s\n", SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
 
@@ -1894,7 +2178,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
 	);
 
 	if (!window) {
-		SDL_Log("Failed to create Window: %s\n", SDL_GetError());
+		SDL_LogError(0,"Failed to create Window: %s\n", SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
 	app->window.sdl = window;
@@ -1916,7 +2200,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
 	app->window.gl_context = SDL_GL_CreateContext(window);
 
 	if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-		SDL_Log("Failed to load OpenGL via Glad: %s\n", SDL_GetError());
+		SDL_LogError(0,"Failed to load OpenGL via Glad: %s\n", SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
 
@@ -2016,6 +2300,13 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 	case SDL_EVENT_WINDOW_FOCUS_GAINED:
 		app->has_focus = true;
 		app->last_tick = SDL_GetTicks();
+
+#if defined(__DEBUG__)
+		if(!load_game_lib(&app->api, &app->game, &app->hot_reload)){
+			SDL_LogError(0, "Hot Reload failed!");
+			return SDL_APP_FAILURE;
+		}
+#endif
 		break;
 
 	case SDL_EVENT_WINDOW_FOCUS_LOST:

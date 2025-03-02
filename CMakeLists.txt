@@ -21,11 +21,15 @@ endif()
 
 add_subdirectory(third-party/glad-3.3core-3.0es)
 
+add_subdirectory(game)
+
 add_executable(c_roguelike_framework
-    main.c
+    c_roguelike_framework.c
+    c_roguelike_framework.h
     third-party/stb/stb_truetype.h
     third-party/stb/stb_image.h
 )
+set_target_properties(c_roguelike_framework PROPERTIES LINKER_LANGUAGE C)
 
 #target_compile_options(c_roguelike_framework PRIVATE
 #        -Wall
@@ -35,11 +39,17 @@ add_executable(c_roguelike_framework
 #        -Wpedantic
 #        -Werror=vla
 #)
-
 target_link_libraries(c_roguelike_framework PRIVATE
         SDL3::SDL3
         glad
 )
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(__DEBUG__)
+else()
+    target_link_libraries(c_roguelike_framework PRIVATE -static roguelike_game)
+endif ()
+
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_link_libraries(c_roguelike_framework PRIVATE -static -pthread)
 endif()
