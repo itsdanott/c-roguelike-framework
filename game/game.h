@@ -10,12 +10,12 @@
 #endif
 
 typedef struct {
-	float pos_x;
-	float pos_y;
+    float pos_x;
+    float pos_y;
 } Player;
 
 typedef struct {
-	Player player;
+    Player player;
 } Game;
 
 bool game_init(CRLF_API* new_api);
