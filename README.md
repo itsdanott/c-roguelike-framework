@@ -1,6 +1,7 @@
 
 # C Roguelike Framework
-This is a lightweight C framework in preparation for 7drl 2025.
+Lightweight C99 framework in preparation for 7drl 2025.
+
 It also serves as a learning project to get started with SDL3.
 
 For simplicity, we use GL 3.3 core for all desktop platforms and GL ES 3.0
@@ -18,6 +19,11 @@ other.
 - [stb](https://github.com/nothings/stb/)
 - [miniaudio](https://github.com/mackron/miniaudio)
 - [FastNoise Lite](https://github.com/Auburn/FastNoiseLite/)
+
+## Features
+- Text Rendering
+- Rect Rendering
+- Hot Reloading 
 
 ## TODO
 - Arena allocator

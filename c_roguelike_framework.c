@@ -1,10 +1,10 @@
 /*
 * C ROGUELIKE FRAMEWORK ********************************************************
 
-@@@      @@@      @      @@@
-@        @ @      @      @
-@        @@@      @      @@@
-@@@      @  @     @@@    @
+@@@   @@@    @     @@@
+@     @ @    @     @
+@     @@@    @     @@@
+@@@   @  @   @@@   @
 
 Lightweight C99 framework in preparation for 7drl 2025.
 
@@ -55,16 +55,6 @@ TODO:
 #include "c_roguelike_framework.h"
 
 #include "game/game.h"
-
-/* INTEGERS *******************************************************************/
-typedef Sint8 i8;
-typedef Sint16 i16;
-typedef Sint32 i32;
-typedef Sint64 i64;
-typedef Uint8 u8;
-typedef Uint16 u16;
-typedef Uint32 u32;
-typedef Uint64 u64;
 
 /* GLOBALS ********************************************************************/
 const char* APP_TITLE = "ROGUELIKE GAME";
@@ -185,134 +175,6 @@ const char* FONT_PATH = "font-tiny/tiny.ttf";
 #define RECT_VERTEX_BUFFER_CAPACITY (RECT_BUFFER_CAPACITY*6)
 #define RECT_MAX_SORT_ORDER 128.f
 #define RECT_MIN_SORT_ORDER (-RECT_MAX_SORT_ORDER)
-
-/* MATH ***********************************************************************/
-typedef struct {
-    i32 x, y;
-} ivec2;
-
-typedef struct {
-    i32 x, y, z;
-} ivec3;
-
-typedef struct {
-    float x, y;
-} vec2;
-
-typedef struct {
-    float x, y, z;
-} vec3;
-
-//NOTE: this violates ISO C99's unnamed structs/unions rule!
-typedef struct {
-    union {
-        struct {
-            float x, y, z, w;
-        }; // For position
-        struct {
-            float r, g, b, a;
-        }; // For color
-    };
-} vec4;
-
-vec2 vec2_mul_float(const vec2 vec, const float fac) {
-    return (vec2){
-        vec.x * fac,
-        vec.y * fac,
-    };
-}
-
-vec3 vec3_mul_float(const vec3 vec, const float fac) {
-    return (vec3){
-        vec.x * fac,
-        vec.y * fac,
-        vec.z * fac,
-    };
-}
-
-vec2 vec2_mul_vec2(const vec2 a, const vec2 b) {
-    return (vec2){
-        a.x * b.x,
-        a.y * b.y,
-    };
-}
-
-vec2 vec2_add_vec2(const vec2 a, const vec2 b) {
-    return (vec2){
-        a.x + b.x,
-        a.y + b.y,
-    };
-}
-
-vec2 vec2_sub_vec2(const vec2 a, const vec2 b) {
-    return (vec2){
-        a.x - b.x,
-        a.y - b.y,
-    };
-}
-
-vec2 vec2_sub_float(const vec2 a, const float b) {
-    return (vec2){
-        a.x - b,
-        a.y - b,
-    };
-}
-
-//column-major mat
-//that means we access elements by matrix[column][row] and what appears to be
-//the first "row" when initializing a matrix is actually the first column.
-//keep in mind that we use colum-major matrices as these are required by OpenGL
-//this is a bit confusing as they look like row-major matrices when initializing
-typedef struct {
-    float matrix[4][4];
-} mat4;
-
-mat4 mat4_ortho(
-    const float left, const float right,
-    const float bottom, const float top,
-    const float z_near, const float z_far
-) {
-    mat4 result = {0};
-    result.matrix[0][0] = 2.0f / (right - left);
-    result.matrix[1][1] = 2.0f / (top - bottom);
-    result.matrix[2][2] = -2.0f / (z_far - z_near);
-    result.matrix[3][0] = -(right + left) / (right - left);
-    result.matrix[3][1] = -(top + bottom) / (top - bottom);
-    result.matrix[3][2] = -(z_far + z_near) / (z_far - z_near);
-    result.matrix[3][3] = 1.0f;
-    return result;
-}
-
-float float_lerp(const float a, const float b, const float t) {
-    return (1 - t) * a + t * b;
-}
-
-vec2 vec2_lerp(const vec2 a, const vec2 b, const float t) {
-    return (vec2){
-        float_lerp(a.x, b.x, t),
-        float_lerp(a.y, b.y, t),
-    };
-}
-
-vec3 vec3_lerp(const vec3 a, const vec3 b, const float t) {
-    return (vec3){
-        float_lerp(a.x, b.x, t),
-        float_lerp(a.y, b.y, t),
-        float_lerp(a.z, b.z, t),
-    };
-}
-
-/* COLORS *********************************************************************/
-#define COLOR_RED			(vec3){1.00f,0.00f,0.00f}
-#define COLOR_GREEN			(vec3){0.00f,1.00f,0.00f}
-#define COLOR_BLUE			(vec3){0.00f,0.00f,1.00f}
-#define COLOR_YELLOW		(vec3){1.00f,1.00f,0.00f}
-#define COLOR_MAGENTA		(vec3){1.00f,0.00f,1.00f}
-#define COLOR_BLACK			(vec3){0.00f,0.00f,0.00f}
-#define COLOR_GRAY			(vec3){0.50f,0.50f,0.50f}
-#define COLOR_GRAY_BRIGHT	(vec3){0.75f,0.75f,0.75f}
-#define COLOR_GRAY_DARK		(vec3){0.25f,0.25f,0.25f}
-#define COLOR_WHITE			(vec3){1.00f,1.00f,1.00f}
 
 /* RENDERER *******************************************************************/
 typedef struct {
@@ -1548,11 +1410,15 @@ typedef struct {
 
 	This prevents permission denied errors and allows for instant responsens to
 	changes in the gameplay code.
+
+	Hot reloading is limited to changes in game.c though.
+	Any changes to struct layouts or other memory specifics in game.h will
+	cause undefined behaviour and issues!
 */
 
 #if defined(__DEBUG__)
-typedef bool (*Game_Init_Func)(CRLF_API*);
-typedef void (*Game_Tick_Func)(Game*);
+typedef bool (*Game_Init_Func)(CRLF_API*, Game*);
+typedef void (*Game_Tick_Func)(Game*, float);
 typedef void (*Game_Draw_Func)(Game*);
 typedef void (*Game_Cleanup_Func)(Game*);
 
@@ -1648,7 +1514,7 @@ bool load_game_lib(
 		return false;
 	}
 
-	if (!hot_reload->game_init_func(api)) {
+	if (!hot_reload->game_init_func(api, game)) {
 		CRLF_LogError("Hot reload successful but game_init failed!");
 		return false;
 	}
@@ -1811,7 +1677,7 @@ static bool app_init(App* app) {
 	if (!hot_reload_init(&app->hot_reload, base_path, &app->api, &app->game))
 		return false;
 #else
-    if (!game_init(&app->api)) return false;
+    if (!game_init(&app->api, &app->game)) return false;
 #endif
 
     Raw_Texture* raw_textures[] = {
@@ -1913,9 +1779,9 @@ static bool app_init(App* app) {
 
 static void app_tick(App* app) {
 #if defined(__DEBUG__)
-	app->hot_reload.game_tick_func(&app->game);
+	app->hot_reload.game_tick_func(&app->game, DELTA_TIME);
 #else
-    game_tick(&app->game);
+    game_tick(&app->game, DELTA_TIME);
 #endif
 }
 

@@ -39,6 +39,7 @@ set_target_properties(c_roguelike_framework PROPERTIES LINKER_LANGUAGE C)
 #        -Wpedantic
 #        -Werror=vla
 #)
+
 target_link_libraries(c_roguelike_framework PRIVATE
         SDL3::SDL3
         glad

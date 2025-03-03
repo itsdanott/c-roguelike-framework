@@ -13,3 +13,5 @@ else()
         game.c
     )
 endif()
+
+target_include_directories(roguelike_game PRIVATE "../third-party/SDL/include")
