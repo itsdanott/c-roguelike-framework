@@ -28,7 +28,6 @@ Third Party Libs:
     - FastNoise Lite
 
 TODO:
-    - Arena allocator
     - replace stb function defs with SDL ones to avoid C runtime library
     - UI Layout persistence accross aspect ratios and resolutions
     - Textbox alignment(pivots)
@@ -1130,7 +1129,7 @@ void draw_rects(
 
 /* TEXT RENDERING *************************************************************/
 void render_text(
-    const char* text,
+    const String text,
     const Font* font,
     const vec2 pos,
     const vec3 color,
@@ -1140,7 +1139,6 @@ void render_text(
 ) {
     float x = 0, y = 0;
     size_t glyph_iterator = 0;
-    const size_t text_len = SDL_strlen(text);
     const vec2 adjusted_pos = pos;
     //TODO: precalculate the text bounds and add vh centering functionality!
 
@@ -1153,12 +1151,12 @@ void render_text(
         .texture_id = font->texture_union.texture_id,
     };
 
-    for (size_t i = 0; i < text_len; i++) {
-        const char c = text[i];
+    for (size_t i = 0; i < text.length; i++) {
+        const char c = text.chars[i];
         switch (c) {
         case '\n':
             x = 0;
-            y += font->size;
+            y += (float)font->size;
             continue;
         case '\t':
             x += FONT_TAB_SIZE;
@@ -1211,7 +1209,7 @@ void render_text(
 //NOTE: This is highly ineffcient - it duplicates the glyphs 4 times, introducing
 //overdraw and vertex redundancy. A shader based solution would be better.
 void render_text_outlined(
-    const char* text,
+    const String text,
     const Font* font,
     const vec2 pos,
     const vec3 color,
@@ -1813,7 +1811,7 @@ static void app_draw(App* app) {
 
     const Font* font = &app->font1;
     render_text(
-        "Hello 7DRL 2025!",
+        STRING("Hello 7DRL 2025!"),
         font,
         (vec2){
             (app->mouse.pos_x / window_width) * viewport_width,
@@ -1883,7 +1881,7 @@ static void app_draw(App* app) {
         true
     );
     render_text(
-        "7DRL 2025",
+        STRING("7DRL 2025"),
         font,
         (vec2){
             px - 32.f,
@@ -2043,7 +2041,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
     SDL_Window* window = SDL_CreateWindow(
         APP_TITLE,
         SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
-        SDL_WINDOW_MAXIMIZED | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
+        /*SDL_WINDOW_MAXIMIZED |*/ SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
     );
 
     if (!window) {

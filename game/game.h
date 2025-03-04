@@ -1,3 +1,10 @@
+/*
+
+Make sure to define the Game struct in the header as it is also a member
+of the framework's App struct.
+
+*/
+
 #ifndef GAME_H
 #define GAME_H
 
@@ -10,6 +17,7 @@
 #define false	0
 #endif
 
+/* PUBLIC GAME TYPES **********************************************************/
 typedef struct {
     float pos_x;
     float pos_y;
@@ -29,7 +37,7 @@ static Game default_game() {
 /* PUBLIC GAME API ************************************************************/
 bool game_init(CRLF_API* new_api, Game* game);
 void game_tick(Game* game, float dt);
-void game_draw();
-void game_cleanup();
+void game_draw(Game* game);
+void game_cleanup(Game* game);
 
 #endif //GAME_H

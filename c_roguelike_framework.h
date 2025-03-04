@@ -23,6 +23,21 @@ typedef Uint16 u16;
 typedef Uint32 u32;
 typedef Uint64 u64;
 
+/* STRING *********************************************************************/
+typedef struct {
+    i32 length;
+    const char* chars;
+} String;
+
+static String make_string(const char* str) {
+    return (String){\
+        .length = SDL_strlen(str),
+        .chars = str,
+    };
+}
+
+#define STRING(str) make_string(str)
+
 /* MATH ***********************************************************************/
 typedef struct {
     i32 x, y;
@@ -150,6 +165,43 @@ static vec3 vec3_lerp(const vec3 a, const vec3 b, const float t) {
 #define COLOR_GRAY_BRIGHT	(vec3){0.75f,0.75f,0.75f}
 #define COLOR_GRAY_DARK		(vec3){0.25f,0.25f,0.25f}
 #define COLOR_WHITE			(vec3){1.00f,1.00f,1.00f}
+
+/* ARENA ALLOC ****************************************************************/
+typedef struct {
+    u8* memory;
+    size_t capacity;
+    uintptr_t offset;
+} Arena;
+
+static Arena arena_init(const size_t capacity) {
+    uint8_t* memory = malloc(capacity);
+    assert(memory != NULL);
+    const uintptr_t memory_address = (uintptr_t)memory;
+    const uintptr_t next_alloc_offset = (memory_address % 64);//cache align
+    return (Arena) {
+        .memory = memory,
+        .capacity = capacity,
+        .offset = next_alloc_offset,
+    };
+}
+
+static void arena_cleanup(const Arena* arena) {
+    assert(arena->memory != NULL);
+    free(arena->memory);
+}
+
+static void* arena_alloc(Arena* arena, const size_t size) {
+    assert(arena != NULL);
+    assert(arena->offset + size < arena->capacity);
+    void* ptr = arena->memory + arena->offset;
+    arena->offset += size;
+    return ptr;
+}
+
+static void arena_clear(Arena* arena) {
+    assert(arena != NULL);
+    arena->offset = 0;
+}
 
 /* PUBLIC API ******************************************************************/
 void CRLF_Log(const char* fmt, ...);

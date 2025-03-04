@@ -2,6 +2,12 @@
 
 static CRLF_API* api;
 
+/* UI *************************************************************************/
+void draw_main_menu() {
+
+}
+
+/* PUBLIC GAME API IMPLEMENTATION *********************************************/
 bool game_init(CRLF_API* new_api, Game* game) {
     api = new_api;
     *game = default_game();
@@ -15,5 +21,10 @@ bool game_init(CRLF_API* new_api, Game* game) {
 void game_tick(Game* game, float dt) {
 }
 
-void game_draw() {}
-void game_cleanup() {}
+void game_draw(Game* game) {
+    draw_main_menu();
+}
+
+void game_cleanup(Game* game) {
+
+}

@@ -26,7 +26,6 @@ other.
 - Hot Reloading 
 
 ## TODO
-- Arena allocator
 - replace stb function defs with SDL ones to avoid C runtime library
 - UI Layout persistence accross aspect ratios and resolutions
 - Textbox alignment(pivots)
