@@ -174,8 +174,8 @@ typedef struct {
 } Arena;
 
 static Arena arena_init(const size_t capacity) {
-    uint8_t* memory = malloc(capacity);
-    assert(memory != NULL);
+    uint8_t* memory = SDL_malloc(capacity);
+    SDL_assert(memory != NULL);
     const uintptr_t memory_address = (uintptr_t)memory;
     const uintptr_t next_alloc_offset = (memory_address % 64);//cache align
     return (Arena) {
@@ -186,20 +186,20 @@ static Arena arena_init(const size_t capacity) {
 }
 
 static void arena_cleanup(const Arena* arena) {
-    assert(arena->memory != NULL);
-    free(arena->memory);
+    SDL_assert(arena->memory != NULL);
+    SDL_free(arena->memory);
 }
 
 static void* arena_alloc(Arena* arena, const size_t size) {
-    assert(arena != NULL);
-    assert(arena->offset + size < arena->capacity);
+    SDL_assert(arena != NULL);
+    SDL_assert(arena->offset + size < arena->capacity);
     void* ptr = arena->memory + arena->offset;
     arena->offset += size;
     return ptr;
 }
 
 static void arena_clear(Arena* arena) {
-    assert(arena != NULL);
+    SDL_assert(arena != NULL);
     arena->offset = 0;
 }
 
