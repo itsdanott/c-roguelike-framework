@@ -1624,37 +1624,18 @@ bool load_game_lib(
         return false;
     }
 
-    hot_reload->game_init = (Game_Init_Func)SDL_LoadFunction(
-        hot_reload->lib_obj, "game_init"
-    );
-    if (hot_reload->game_init == NULL) {
-        SDL_LogError(0, "load_game_lib: %s", SDL_GetError());
-        return false;
-    }
+#define LOAD_GAME_LIB_FUNC_PTR(func, func_t) {                                 \
+    hot_reload->func = (func_t)SDL_LoadFunction(hot_reload->lib_obj, #func);   \
+    if (hot_reload->func == NULL) {                                            \
+        SDL_LogError(0, "load_game_lib: %s", SDL_GetError());                  \
+        return false;                                                          \
+    }}
+    LOAD_GAME_LIB_FUNC_PTR(game_init, Game_Init_Func)
+    LOAD_GAME_LIB_FUNC_PTR(game_tick, Game_Tick_Func)
+    LOAD_GAME_LIB_FUNC_PTR(game_draw, Game_Draw_Func)
+    LOAD_GAME_LIB_FUNC_PTR(game_cleanup, Game_Cleanup_Func)
 
-    hot_reload->game_tick = (Game_Tick_Func)SDL_LoadFunction(
-        hot_reload->lib_obj, "game_tick"
-    );
-    if (hot_reload->game_tick == NULL) {
-        SDL_LogError(0, "load_game_lib: %s", SDL_GetError());
-        return false;
-    }
-
-    hot_reload->game_draw = (Game_Draw_Func)SDL_LoadFunction(
-        hot_reload->lib_obj, "game_draw"
-    );
-    if (hot_reload->game_draw == NULL) {
-        SDL_LogError(0, "load_game_lib: %s", SDL_GetError());
-        return false;
-    }
-
-    hot_reload->game_cleanup = (Game_Cleanup_Func)SDL_LoadFunction(
-        hot_reload->lib_obj, "game_cleanup"
-    );
-    if (hot_reload->game_cleanup == NULL) {
-        SDL_LogError(0, "load_game_lib: %s", SDL_GetError());
-        return false;
-    }
+#undef LOAD_GAME_LIB_FUNC_PTR
 
     if (!hot_reload->game_init(api, game, ui_ctx)) {
         log_error("Hot reload successful but game_init failed!");
@@ -2215,7 +2196,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
         SDL_LogError(0, "Failed to set window vsync! %s", SDL_GetError());
     }
 
-
 #if defined (SDL_PLATFORM_EMSCRIPTEN)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
@@ -2231,7 +2211,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
     //TODO: test if OPENGL_FORWARD_COMPAT is required for mac with sdl
 
     app->window.gl_context = SDL_GL_CreateContext(window);
-
 
     if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
         SDL_LogError(0, "Failed to load OpenGL via Glad: %s", SDL_GetError());
