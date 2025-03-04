@@ -6,9 +6,11 @@
 @     @@@    @     @@@
 @@@   @  @   @@@   @
 
-NOTE: make sure to include SDL3 BEFORE including this header!
+Lightweight C99 framework for 7drl 2025.
 
-*/
+NOTE: Make sure to include SDL3 BEFORE including this header
+
+*******************************************************************************/
 
 #ifndef C_ROGUELIKE_FRAMEWORK_H
 #define C_ROGUELIKE_FRAMEWORK_H
@@ -30,7 +32,7 @@ typedef struct {
 } String;
 
 static String make_string(const char* str) {
-    return (String){\
+    return (String){
         .length = SDL_strlen(str),
         .chars = str,
     };
@@ -177,8 +179,8 @@ static Arena arena_init(const size_t capacity) {
     uint8_t* memory = SDL_malloc(capacity);
     SDL_assert(memory != NULL);
     const uintptr_t memory_address = (uintptr_t)memory;
-    const uintptr_t next_alloc_offset = (memory_address % 64);//cache align
-    return (Arena) {
+    const uintptr_t next_alloc_offset = (memory_address % 64); //cache align
+    return (Arena){
         .memory = memory,
         .capacity = capacity,
         .offset = next_alloc_offset,
@@ -203,15 +205,102 @@ static void arena_clear(Arena* arena) {
     arena->offset = 0;
 }
 
-/* PUBLIC API ******************************************************************/
-void CRLF_Log(const char* fmt, ...);
-void CRLF_LogWarning(const char* fmt, ...);
-void CRLF_LogError(const char* fmt, ...);
+/* UI *************************************************************************/
+typedef enum {
+    UI_ELEMENT_TYPE_NONE,
+    //Layout can either be empty elements or containers
+    UI_ELEMENT_TYPE_LAYOUT,
+    UI_ELEMENT_TYPE_TEXT,
+    UI_ELEMENT_TYPE_IMAGE,
+} UI_Element_Type;
 
 typedef struct {
-    void (*CRLF_Log)(const char*, ...);
-    void (*CRLF_LogWarning)(const char*, ...);
-    void (*CRLF_LogError)(const char*, ...);
+    size_t id;
+    size_t depth;
+    UI_Element_Type type;
+    const char* text;
+    size_t texture_id;
+    vec3 bg_color;
+    vec3 color;
+    size_t first_child_id;
+    size_t child_count;
+} UI_Element;
+
+#define UI_MAX_ELEMENTS 2048
+#define UI_STRING_ARENA_SIZE 2048
+
+typedef struct {
+    UI_Element elements[UI_MAX_ELEMENTS];
+    size_t tree_depth;
+    size_t elem_count;
+    size_t temp_depth;
+    UI_Element temp_elem;
+    UI_Element temp_queue[UI_MAX_ELEMENTS];
+    size_t temp_queue_count;
+    Arena string_arena;
+} UI_Context;
+
+#define UI_LAYOUT(...) ui_element_start(); __VA_ARGS__ ui_element_end()
+#define UI_TEXT(text) UI_LAYOUT(ui_element_set_text(text);)
+#define UI_IMAGE(texture_id) UI_LAYOUT(ui_element_set_image(texture_id);)
+
+extern UI_Context* ui_ctx;
+
+static void ui_element_start() {
+    SDL_assert(ui_ctx->elem_count + 1 <= UI_MAX_ELEMENTS);
+    const size_t new_id = ui_ctx->elem_count;
+
+    //If we already have a temp elem - enqueue it as we are going one depth
+    //level lower
+    if (ui_ctx->temp_elem.type != UI_ELEMENT_TYPE_NONE) {
+        if (ui_ctx->temp_elem.child_count == 0) {
+            ui_ctx->temp_elem.first_child_id = new_id;
+        }
+        ui_ctx->temp_elem.child_count++;
+        ui_ctx->temp_queue[ui_ctx->temp_queue_count++] =
+            ui_ctx->temp_elem;
+    }
+    ui_ctx->temp_elem = (UI_Element){
+        .id = new_id,
+        .type = UI_ELEMENT_TYPE_LAYOUT,
+        .depth = ui_ctx->temp_depth,
+    };
+    ui_ctx->elem_count++;
+    ui_ctx->temp_depth++;
+    ui_ctx->tree_depth = SDL_max(ui_ctx->temp_depth, ui_ctx->tree_depth);
+}
+
+static void ui_element_set_text(const char* text) {
+    SDL_assert(ui_ctx->temp_elem.type == UI_ELEMENT_TYPE_LAYOUT);
+    ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_TEXT;
+    ui_ctx->temp_elem.text = text;
+}
+
+static void ui_element_set_image(const size_t texture_id) {
+    SDL_assert(ui_ctx->temp_elem.type == UI_ELEMENT_TYPE_LAYOUT);
+    ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_IMAGE;
+    ui_ctx->temp_elem.texture_id = texture_id;
+}
+
+static void ui_element_end() {
+    ui_ctx->elements[ui_ctx->temp_elem.id] = ui_ctx->temp_elem;
+    if (ui_ctx->temp_queue_count > 0) {
+        ui_ctx->temp_queue_count--;
+        ui_ctx->temp_elem = ui_ctx->temp_queue[ui_ctx->temp_queue_count];
+    }
+    ui_ctx->temp_depth--;
+}
+
+/* PUBLIC API ******************************************************************/
+//TODO: as we now needed to link the gamelib to SDL the log functions are redundant
+void log_msg(const char* fmt, ...);
+void log_warning(const char* fmt, ...);
+void log_error(const char* fmt, ...);
+
+typedef struct {
+    void (*log_msg)(const char* fmt, ...);
+    void (*log_warning)(const char* fmt, ...);
+    void (*log_error)(const char* fmt, ...);
 } CRLF_API;
 
 #endif //C_ROGUELIKE_FRAMEWORK_H

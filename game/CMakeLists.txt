@@ -8,6 +8,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
             PREFIX ""
     )
 else()
+    add_compile_definitions(__GAMELIB_STATIC_LINK__)
     add_library(roguelike_game STATIC
         game.h
         game.c
@@ -15,3 +16,7 @@ else()
 endif()
 
 target_include_directories(roguelike_game PRIVATE "../third-party/SDL/include")
+
+target_link_libraries(roguelike_game PRIVATE
+    SDL3::SDL3
+)
