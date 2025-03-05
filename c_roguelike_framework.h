@@ -218,12 +218,13 @@ typedef struct {
     size_t id;
     size_t depth;
     UI_Element_Type type;
-    const char* text;
+    String text;
     size_t texture_id;
     vec3 bg_color;
     vec3 color;
     size_t first_child_id;
     size_t child_count;
+    UI_Element_Sizes size;
 } UI_Element;
 
 #define UI_MAX_ELEMENTS 2048
@@ -270,7 +271,7 @@ static void ui_element_start() {
     ui_ctx->tree_depth = SDL_max(ui_ctx->temp_depth, ui_ctx->tree_depth);
 }
 
-static void ui_element_set_text(const char* text) {
+static void ui_element_set_text(const String text) {
     SDL_assert(ui_ctx->temp_elem.type == UI_ELEMENT_TYPE_LAYOUT);
     ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_TEXT;
     ui_ctx->temp_elem.text = text;

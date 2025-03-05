@@ -27,6 +27,19 @@ Lightweight C99 framework made for 7drl 2025.
 
 #include "game/game.h"
 
+/* DEBUG DEFINES **************************************************************/
+#if !defined(__LEAK_DETECTION__)
+#define CRLF_malloc SDL_malloc
+#define CRLF_free SDL_free
+#else
+#define CRLF_malloc malloc
+#define CRLF_free free
+#if defined(__MSVC_CRT_LEAK_DETECTION__)
+#define _CRTDBG_MAP_ALLOC
+#include <crtdbg.h>
+#endif
+#endif
+
 /* GLOBALS ********************************************************************/
 const char* APP_TITLE = "ROGUELIKE GAME";
 const char* APP_VERSION = "0.1.0";
@@ -40,8 +53,8 @@ const char* APP_IDENTIFIER = "com.otone.roguelike";
 #define SDL_WINDOW_HEIGHT 480
 #endif
 
-const u64 TICK_RATE_IN_MS = 16;
-const float DELTA_TIME = (float)TICK_RATE_IN_MS / SDL_MS_PER_SECOND;
+#define TICK_RATE_IN_MS 16
+const float DELTA_TIME = ((float)TICK_RATE_IN_MS / (float)SDL_MS_PER_SECOND);
 
 UI_Context* ui_ctx;
 
@@ -212,10 +225,8 @@ char* temp_path_append(const char* base, const char* file) {
     For 7drl 2025 we want to use a SINGLE texture array for all things ui.
  */
 typedef enum {
-    //loaded via STB_Image
-    TEXTURE_RAW_SOURCE_STB_IMAGE,
-    //loaded from Memory
-    TEXTURE_RAW_SOURCE_DYNAMIC,
+    TEXTURE_RAW_SOURCE_STB_IMAGE, //loaded via STB_Image
+    TEXTURE_RAW_SOURCE_DYNAMIC, //loaded from Memory
 } Texture_Raw_Source;
 
 typedef struct {
@@ -240,28 +251,32 @@ typedef struct {
     bool gamma_correction;
 } Texture_Config;
 
-const Texture_Config TEXTURE_CONFIG_DEFAULT = (Texture_Config){
-    .filter = false,
-    .repeat = true,
-    .gamma_correction = false,
-};
+Texture_Config default_texture_config() {
+    return (Texture_Config){
+        .filter = false,
+        .repeat = true,
+        .gamma_correction = false,
+    };
+}
 
-const Texture_Config TEXTURE_CONFIG_DEFAULT_GAMMACORRECT = (Texture_Config){
-    .filter = false,
-    .repeat = true,
-    .gamma_correction = true,
-};
+Texture_Config default_texture_config_gammacorrect() {
+    return (Texture_Config){
+        .filter = false,
+        .repeat = true,
+        .gamma_correction = true,
+    };
+}
 
 Raw_Texture* raw_texture_rgba_from_single_channel(
     const u8* single_channel_data,
     const i32 width, const i32 height
 ) {
-    Raw_Texture* raw_texture = SDL_malloc(sizeof(Raw_Texture));
+    Raw_Texture* raw_texture = CRLF_malloc(sizeof(Raw_Texture));
     *raw_texture = (Raw_Texture){
         .width = width,
         .height = height,
         .channels = 4,
-        .data = SDL_malloc(sizeof(u8) * width * height * 4),
+        .data = CRLF_malloc(sizeof(u8) * width * height * 4),
         .source = TEXTURE_RAW_SOURCE_DYNAMIC,
     };
 
@@ -286,7 +301,7 @@ Raw_Texture* raw_texture_from_file(
         return NULL;
     }
 
-    Raw_Texture* texture = SDL_malloc(sizeof(Raw_Texture));
+    Raw_Texture* texture = CRLF_malloc(sizeof(Raw_Texture));
     *texture = (Raw_Texture){
         .source = TEXTURE_RAW_SOURCE_STB_IMAGE,
     };
@@ -302,12 +317,15 @@ void raw_texture_free(Raw_Texture* texture) {
     SDL_assert(texture->data != NULL);
     switch (texture->source) {
     case TEXTURE_RAW_SOURCE_DYNAMIC:
-        SDL_free(texture->data);
+        CRLF_free(texture->data);
         break;
     case TEXTURE_RAW_SOURCE_STB_IMAGE:
         stbi_image_free(texture->data);
+        break;
     }
     texture->data = NULL;
+
+    CRLF_free(texture);
     texture = NULL;
 }
 
@@ -507,8 +525,7 @@ typedef struct {
     stbtt_pack_context pack_context;
     stbtt_packedchar char_data[FONT_UNICODE_RANGE];
     Font_Texture_Type texture_type;
-
-    i32 size;
+    float size;
 
     union {
         GL_Texture texture;
@@ -521,7 +538,7 @@ typedef struct {
 Raw_Texture* font_load_raw_texture(
     const char* file_path,
     Font* font,
-    const i32 size
+    const float size
 ) {
     SDL_assert(font != NULL);
     SDL_PathInfo path_info;
@@ -562,7 +579,7 @@ Raw_Texture* font_load_raw_texture(
     }
 
     stbtt_PackEnd(&font->pack_context);
-    SDL_free(file_data);
+    CRLF_free(file_data);
 
     Raw_Texture* raw_texture = raw_texture_rgba_from_single_channel(
         pixels, FONT_TEXTURE_SIZE, FONT_TEXTURE_SIZE
@@ -578,7 +595,7 @@ bool font_load_single(const char* file_path, Font* font, const i32 size) {
 
     font->texture_type = FONT_TEXTURE_TYPE_SINGLE;
     font->texture_union.texture = gl_texture_from_raw_texture(
-        raw_texture, TEXTURE_CONFIG_DEFAULT
+        raw_texture, default_texture_config()
     );
     raw_texture_free(raw_texture);
 
@@ -708,7 +725,7 @@ typedef struct {
     u32 frame_buffer_texture;
     u32 render_buffer;
 
-    //to be initially configured
+    //These members should be configured first
     vec4 clear_color;
     i32 frame_buffer_divisor;
     bool has_blending;
@@ -730,7 +747,7 @@ Viewport default_viewport_game() {
 Viewport default_viewport_ui() {
     return (Viewport){
         .clear_color = (vec4){0},
-        .frame_buffer_divisor = 2,
+        .frame_buffer_divisor = 8,
         .has_blending = true,
         .has_depth_buffer = true,
         .floating_point_precision = false,
@@ -906,12 +923,14 @@ typedef struct {
     vec2 min, max;
 } Tex_Coords_Quad;
 
-const Tex_Coords RECT_DEFAULT_TEX_COORDS = (Tex_Coords){
-    .bottom_left = {0.0f, 0.0f},
-    .bottom_right = {1.0f, 0.0f},
-    .top_left = {0.0f, 1.0f},
-    .top_right = {1.0f, 1.0f},
-};
+Tex_Coords default_rect_tex_coords() {
+    return (Tex_Coords){
+        .bottom_left = {0.0f, 0.0f},
+        .bottom_right = {1.0f, 0.0f},
+        .top_left = {0.0f, 1.0f},
+        .top_right = {1.0f, 1.0f},
+    };
+}
 
 Tex_Coords tex_coords_mul_float(
     const Tex_Coords tex_coords,
@@ -1017,8 +1036,7 @@ typedef struct {
     vec2 pos;
     vec3 color;
     vec2 tex_coord;
-    //Min-Val = 0
-    float sort_order;
+    float sort_order; //Value Range SORT_ORDER_MIN - SORT_ORDER_MAX
     i32 texture_id;
 } Rect_Vertex;
 
@@ -1044,41 +1062,24 @@ void build_rect_vertex_buffer(
         };
         const vec2 pivot_offset = vec2_mul_vec2(rect.pivot, rect.size);
 
-        //Bottom Left
-        vertex.pos = vec2_sub_vec2(rect.pos, pivot_offset);
-        vertex.tex_coord = rect.tex_coords.bottom_left;
-        const Rect_Vertex bottom_left = vertex;
-
-        //Bottom Right
-        vertex.pos = vec2_sub_vec2(
-            vec2_add_vec2(rect.pos, (vec2){rect.size.x, 0}), pivot_offset
-        );
-        vertex.tex_coord = rect.tex_coords.bottom_right;
-        const Rect_Vertex bottom_right = vertex;
-
-        //Top Left
-        vertex.pos = vec2_sub_vec2(
-            vec2_add_vec2(rect.pos, (vec2){0, rect.size.y}), pivot_offset
-        );
-        vertex.tex_coord = rect.tex_coords.top_left;
-        const Rect_Vertex top_left = vertex;
-
-        //Top Right
-        vertex.pos = vec2_sub_vec2(
-            vec2_add_vec2(rect.pos, rect.size), pivot_offset
-        );
-        vertex.tex_coord = rect.tex_coords.top_right;
-        const Rect_Vertex top_right = vertex;
-
-        //this can be improved to avoid vertex redundancy using an EBO
+#define MAKE_CORNER_VERTEX(corner, sub_x, sub_y)                                \
+        vertex.pos = vec2_sub_vec2(                                            \
+            vec2_add_vec2(                                                     \
+                rect.pos, (vec2){sub_x * rect.size.x, sub_y * rect.size.y}     \
+            ), pivot_offset);                                                  \
+        vertex.tex_coord = rect.tex_coords.corner;                             \
+        const Rect_Vertex corner = vertex;
+        MAKE_CORNER_VERTEX(bottom_left, 0, 0)
+        MAKE_CORNER_VERTEX(bottom_right, 1, 0)
+        MAKE_CORNER_VERTEX(top_left, 0, 1)
+        MAKE_CORNER_VERTEX(top_right, 1, 1)
+#undef MAKE_CORNER_VERTEX
         vertex_buffer->vertices[vertex_index + 0] = bottom_left;
         vertex_buffer->vertices[vertex_index + 1] = bottom_right;
         vertex_buffer->vertices[vertex_index + 2] = top_left;
-
         vertex_buffer->vertices[vertex_index + 3] = top_left;
         vertex_buffer->vertices[vertex_index + 4] = top_right;
         vertex_buffer->vertices[vertex_index + 5] = bottom_right;
-
         vertex_index += 6;
     }
     SDL_assert(vertex_index <= RECT_VERTEX_BUFFER_CAPACITY);
@@ -1130,13 +1131,13 @@ void render_text(
         switch (c) {
         case '\n':
             x = 0;
-            y += (float)font->size;
+            y += font->size;
             continue;
         case '\t':
-            x += FONT_TAB_SIZE;
+            x += font->size / 3.f; //FONT_TAB_SIZE;
             continue;
         case ' ':
-            x += FONT_SPACE_SIZE;
+            x += font->size / 6.f; //FONT_SPACE_SIZE;
             continue;
         default: break;
         }
@@ -1251,7 +1252,7 @@ void render_nine_slice(
     rect.pivot = (vec2){0.f, 0.f};
     rect.pos = vec2_sub_vec2(pos, half_size);
     rect.tex_coords = tex_coords_mul_float(
-        RECT_DEFAULT_TEX_COORDS,
+        default_rect_tex_coords(),
         bs_normalized
     );
     add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
@@ -1453,14 +1454,14 @@ UI_Context default_ui_context() {
 }
 
 void ui_context_init() {
-    ui_ctx = SDL_malloc(sizeof(UI_Context));
+    ui_ctx = CRLF_malloc(sizeof(UI_Context));
     *ui_ctx = default_ui_context();
     ui_ctx->string_arena = arena_init(UI_STRING_ARENA_SIZE);
 }
 
 void ui_context_cleanup() {
     arena_cleanup(&ui_ctx->string_arena);
-    SDL_free(ui_ctx);
+    CRLF_free(ui_ctx);
 }
 
 void ui_context_clear() {
@@ -1524,7 +1525,7 @@ void ui_tree_print(const size_t id, const int depth) {
         }
         break;
     case UI_ELEMENT_TYPE_TEXT:
-        printf("TEXT: %s\n", elem->text);
+        printf("TEXT: %s\n", elem->text.chars);
         break;
     case UI_ELEMENT_TYPE_IMAGE:
         printf("IMAGE: %zu\n", elem->texture_id);
@@ -1773,8 +1774,10 @@ typedef struct {
 #endif
 } App;
 
-static App default_app() {
-    return (App){
+//NOTE: switched from initializer func to ptr based approach as this exceeded
+//the stack size (unvealed by compiling with MSVC, 1MB Stack size default)
+void init_app_ptr(App* app) {
+    *app = (App){
         .window = (Window){
             .width = SDL_WINDOW_WIDTH,
             .height = SDL_WINDOW_HEIGHT,
@@ -1820,7 +1823,7 @@ static bool app_init(App* app) {
     };
     app->texture_array = gl_texture_array_generate(
         &raw_textures[0], 3,
-        128, 128, 4, TEXTURE_CONFIG_DEFAULT, true
+        128, 128, 4, default_texture_config(), true
     );
 
     app->test_shader = compile_shader_program(
@@ -1941,7 +1944,7 @@ static void app_draw(App* app) {
     const float window_width = (float)app->window.width;
     const float window_height = (float)app->window.height;
 
-    const float font_scale = 1.f;
+    float font_scale = 1.f;
     //this approach would allow for consistent font size among all viewport
     //divisors - but it will come with other caveats - we still need to
     //figure out a way to define the layout - maybe checkout clay for
@@ -1961,7 +1964,7 @@ static void app_draw(App* app) {
         font_scale, 1.0f, &app->rect_buffer
     );
 
-    const Nine_Slice nine_slice = {
+    const Nine_Slice nine_slice_rounded = {
         .total_size = 32.f,
         .border_size = 10.f,
         .quad = {
@@ -1978,57 +1981,82 @@ static void app_draw(App* app) {
         }
     };
 
+    float square_size = SDL_min(viewport_width, viewport_height);
+    vec2 center = (vec2){
+        viewport_width * 0.5f,
+        viewport_height * 0.5f,
+    };
+
     render_nine_slice(
         &app->rect_buffer,
-        (vec2){
-            viewport_width * .5f,
-            viewport_height * .5f,
-        },
-        (vec2){viewport_width, viewport_height},
-        COLOR_RED,
-        0.f,
-        2,
-        &nine_slice_square,
-        false
-    );
-    render_nine_slice(
-        &app->rect_buffer,
-        (vec2){
-            viewport_width * .75f + viewport_width * .25f * 0.5f,
-            viewport_height * .5f
-        },
-        (vec2){viewport_width * .25f, viewport_height},
-        COLOR_RED,
-        0.f,
-        2,
-        &nine_slice,
-        true
-    );
-    float h = font->size + nine_slice.border_size;
-    float px = viewport_width * .75f + viewport_width * .25f * 0.5f;
-    render_nine_slice(
-        &app->rect_buffer,
-        (vec2){
-            px,
-            viewport_height - h,
-        },
-        (vec2){viewport_width * .2f, h},
+        center,
+        (vec2){square_size, square_size},
         COLOR_WHITE,
         0.5f,
         2,
-        &nine_slice,
+        &nine_slice_square,
         true
     );
+
+    render_nine_slice(
+        &app->rect_buffer,
+        center,
+        (vec2){square_size * 0.6f, square_size},
+        COLOR_GRAY,
+        0.0f,
+        2,
+        &nine_slice_rounded,
+        true
+    );
+
+    font_scale = 2.f;
     render_text(
-        STRING("7DRL 2025"),
+        STRING("MICRO MONARCH"),
         font,
         (vec2){
-            px - 32.f,
-            viewport_height - h - nine_slice.border_size * .5f,
+            center.x - 11.f * font_scale * .25f * font->size,
+            center.y + square_size * 0.25f,
         },
         COLOR_YELLOW,
         font_scale, 1.0f, &app->rect_buffer
     );
+    const vec2 button_dist = (vec2){0, square_size * .1f};
+    vec2 button_pos = vec2_add_vec2(center, button_dist);
+
+    const String strings[] = {
+        STRING("NEW GAME"),
+        STRING("LOAD GAME"),
+        STRING("SETTINGS"),
+        STRING("EXIT"),
+    };
+    font_scale = 1.f;
+    for (int i = 0; i < 4; i++) {
+        render_nine_slice(
+            &app->rect_buffer,
+            button_pos,
+            (vec2){square_size * .4f, square_size * .1f},
+            COLOR_GRAY_DARK,
+            2.0f,
+            2,
+            &nine_slice_rounded,
+            true
+        );
+        render_text(
+            strings[i],
+            font,
+            vec2_sub_vec2(
+                button_pos, (vec2){
+                    (float)strings[i].length * font_scale * .25f * font->size,
+                    0
+                }
+            ),
+            COLOR_YELLOW,
+            font_scale, 3.0f, &app->rect_buffer
+        );
+        button_pos = vec2_sub_vec2(button_pos, button_dist);
+    }
+
+    ////////
 
     build_rect_vertex_buffer(&app->rect_buffer, &app->rect_vertex_buffer);
     glUseProgram(app->rect_shader.id);
@@ -2093,7 +2121,7 @@ static void app_cleanup(App* app) {
     SDL_GL_DestroyContext(app->window.gl_context);
     if (app->window.sdl)
         SDL_DestroyWindow(app->window.sdl);
-    SDL_free(app);
+    CRLF_free(app);
 }
 
 static void app_event_mouse_down(
@@ -2157,6 +2185,10 @@ static void app_event_key_down(App* app, const SDL_KeyboardEvent event) {
  *  If you don't set this, the pointer will be NULL in later function calls.
 */
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
+#if defined(__MSVC_CRT_LEAK_DETECTION__)
+    _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+#endif
+
     if (!SDL_SetAppMetadata(
             APP_TITLE,
             APP_VERSION,
@@ -2172,19 +2204,20 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
         return SDL_APP_FAILURE;
     }
 
-    App* app = SDL_malloc(sizeof(App));
+    App* app = CRLF_malloc(sizeof(App));
     if (app == NULL) {
         SDL_LogError(0, "Failed to allocate APP memory: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
-    *app = default_app();
+    init_app_ptr(app);
     *appstate = app;
+
 
     SDL_Window* window = SDL_CreateWindow(
         APP_TITLE,
-        SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT,
-        /*SDL_WINDOW_MAXIMIZED |*/ SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
+        app->window.width, app->window.height,
+        SDL_WINDOW_MAXIMIZED | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
     );
 
     if (!window) {
@@ -2193,7 +2226,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
     }
     app->window.sdl = window;
     if (!SDL_SetWindowSurfaceVSync(window, 1)) {
-        SDL_LogError(0, "Failed to set window vsync! %s", SDL_GetError());
+        SDL_LogWarn(0, "Failed to set window vsync! %s", SDL_GetError());
     }
 
 #if defined (SDL_PLATFORM_EMSCRIPTEN)
@@ -2352,4 +2385,10 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     App* app = (App*)appstate;
 
     app_cleanup(app);
+
+    SDL_Quit();
+#if defined(__MSVC_CRT_LEAK_DETECTION__)
+    _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG);
+    _CrtDumpMemoryLeaks();
+#endif
 }

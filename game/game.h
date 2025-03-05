@@ -17,6 +17,11 @@ is only required to make sure the Stdinc functions are available.
 #include <SDL3/SDL.h>
 #include "../c_roguelike_framework.h"
 
+#if defined(WIN32) && !defined(__GAMELIB_STATIC_LINK__)
+#define GAME_API __declspec(dllexport)
+#else
+#define GAME_API
+#endif
 /* PUBLIC GAME TYPES **********************************************************/
 typedef struct {
     float pos_x;
@@ -37,9 +42,9 @@ static Game default_game() {
 }
 
 /* PUBLIC GAME API ************************************************************/
-bool game_init(CRLF_API* new_api, Game* game, UI_Context* ui);
-void game_tick(Game* game, float dt);
-void game_draw(Game* game);
-void game_cleanup(Game* game);
+GAME_API bool game_init(CRLF_API* new_api, Game* game, UI_Context* ui);
+GAME_API void game_tick(Game* game, float dt);
+GAME_API void game_draw(Game* game);
+GAME_API void game_cleanup(Game* game);
 
 #endif //GAME_H

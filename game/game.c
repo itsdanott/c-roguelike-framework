@@ -3,27 +3,26 @@
 static CRLF_API* api;
 
 /* UI *************************************************************************/
-#if defined(__GAMELIB_STATIC_LINK__)
-extern
-#endif
+#if !defined(__GAMELIB_STATIC_LINK__)
 UI_Context* ui_ctx;
+#endif
 
 void draw_main_menu() {
     UI_LAYOUT(
         UI_LAYOUT(
-            UI_TEXT("NEW GAME");
+            UI_TEXT(STRING("NEW GAME"));
             UI_IMAGE(42);
         );
 
         UI_LAYOUT(
-            UI_TEXT("LOAD GAME");
+            UI_TEXT(STRING("LOAD GAME"));
             UI_IMAGE(69);
         );
     );
 }
 
 /* PUBLIC GAME API IMPLEMENTATION *********************************************/
-bool game_init(CRLF_API* new_api, Game* game, UI_Context* ui) {
+GAME_API bool game_init(CRLF_API* new_api, Game* game, UI_Context* ui) {
     api = new_api;
     *game = default_game();
 #if !defined(__GAMELIB_STATIC_LINK__)
@@ -40,10 +39,10 @@ bool game_init(CRLF_API* new_api, Game* game, UI_Context* ui) {
     return true;
 }
 
-void game_tick(Game* game, float dt) {}
+GAME_API void game_tick(Game* game, float dt) {}
 
-void game_draw(Game* game) {
+GAME_API void game_draw(Game* game) {
     draw_main_menu();
 }
 
-void game_cleanup(Game* game) {}
+GAME_API void game_cleanup(Game* game) {}
