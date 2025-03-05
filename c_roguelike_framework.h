@@ -214,6 +214,22 @@ typedef enum {
     UI_ELEMENT_TYPE_IMAGE,
 } UI_Element_Type;
 
+typedef enum {
+    UI_ELEMENT_SIZE_MODE_PERCENT,
+    UI_ELEMENT_SIZE_MODE_FIXED, //pixel size
+    UI_ELEMENT_SIZE_MODE_CONTENT
+} UI_Element_Size_Mode;
+
+typedef struct {
+    UI_Element_Size_Mode mode;
+    float size; //for percent: 0-1=0-100%
+} UI_Element_Size;
+
+typedef struct {
+    UI_Element_Size horizontal;
+    UI_Element_Size vertical;
+} UI_Element_Sizes;
+
 typedef struct {
     size_t id;
     size_t depth;
