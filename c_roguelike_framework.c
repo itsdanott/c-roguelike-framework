@@ -1449,12 +1449,13 @@ instead of having to re-index.
 
 UI_Context default_ui_context() {
     return (UI_Context){
+        .screen_size = (vec2){SDL_WINDOW_WIDTH, SDL_WINDOW_HEIGHT},
         .elements = {0},
         .temp_queue = {0},
     };
 }
 
-void ui_context_init() {
+void ui_context_init(const vec2 screen_size) {
     ui_ctx = CRLF_malloc(sizeof(UI_Context));
     *ui_ctx = default_ui_context();
     ui_ctx->string_arena = arena_init(UI_STRING_ARENA_SIZE);
@@ -1498,12 +1499,12 @@ void ui_tree_reindex_depth_first_to_breadth_first() {
         per_depth_iterators[element->depth]++;
     }
 
-    //And finally swap the ids and the elements in the array
+    //And finally swap the indices and the elements in the array
     UI_Element reindexed_elements[UI_MAX_ELEMENTS];
     for (size_t i = 0; i < ui_ctx->elem_count; i++) {
         UI_Element element = ui_ctx->elements[i];
         if (element.child_count > 0) {
-            element.first_child_id = new_indices[element.first_child_id];
+            element.first_child_index = new_indices[element.first_child_index];
         }
         reindexed_elements[new_indices[i]] = element;
     }
@@ -1513,16 +1514,16 @@ void ui_tree_reindex_depth_first_to_breadth_first() {
     }
 }
 
-void ui_tree_print(const size_t id, const int depth) {
-    if (id >= ui_ctx->elem_count) return;
+void ui_tree_print(const size_t index, const int depth) {
+    if (index >= ui_ctx->elem_count) return;
     for (int i = 0; i < depth; i++) printf("  ");
-    const UI_Element* elem = &ui_ctx->elements[id];
+    const UI_Element* elem = &ui_ctx->elements[index];
 
     switch (elem->type) {
     case UI_ELEMENT_TYPE_LAYOUT:
         printf("LAYOUT:\n");
         for (size_t i = 0; i < elem->child_count; i++) {
-            ui_tree_print(elem->first_child_id + i, depth + 1);
+            ui_tree_print(elem->first_child_index + i, depth + 1);
         }
         break;
     case UI_ELEMENT_TYPE_TEXT:
@@ -1532,6 +1533,233 @@ void ui_tree_print(const size_t id, const int depth) {
         printf("IMAGE: %zu\n", elem->texture_id);
         break;
     default: SDL_assert(0);
+    }
+}
+
+float ui_element_calc_axis_size(
+    const UI_Element_Size* size,
+    const float parent_size
+) {
+    switch (size->mode) {
+    case UI_ELEMENT_SIZE_MODE_PERCENT:
+        return parent_size * size->value;
+    case UI_ELEMENT_SIZE_MODE_FIXED:
+        return size->value;
+        break;
+    case UI_ELEMENT_SIZE_MODE_CONTENT:
+        // SDL_assert(0);
+        break;
+    }
+    return 0;
+}
+
+vec2 ui_element_calc_size(
+    const UI_Element_Sizes* size,
+    const vec2* parent_size
+) {
+    return (vec2){
+        ui_element_calc_axis_size(&size->width, parent_size->x),
+        ui_element_calc_axis_size(&size->height, parent_size->y)
+    };
+}
+
+float ui_element_calc_axis_pos(
+    const float element_size,
+    const float parent_size,
+    const float parent_pos,
+    const float alignment
+) {
+    return (parent_size - element_size) * .5f + parent_pos;
+}
+
+float ui_element_alignment_x_to_float(const UI_Alignment_X alignment) {
+    switch (alignment) {
+    case UI_ELEMENT_ALIGNMENT_X_CENTER:
+        return 0.f;
+    case UI_ELEMENT_ALIGNMENT_X_LEFT:
+        return -1.f;
+    case UI_ELEMENT_ALIGNMENT_X_RIGHT:
+        return 1.f;
+    default:
+        SDL_assert(0);
+        return 0;
+    }
+}
+
+float ui_element_alignment_y_to_float(const UI_Alignment_Y alignment) {
+    switch (alignment) {
+    case UI_ELEMENT_ALIGNMENT_Y_CENTER:
+        return 0.f;
+    case UI_ELEMENT_ALIGNMENT_Y_BOTTOM:
+        return -1.f;
+    case UI_ELEMENT_ALIGNMENT_Y_TOP:
+        return 1.f;
+    default:
+        SDL_assert(0);
+        return 0;
+    }
+}
+
+//this currently only centers to the parent - not taking parent's other children into account
+vec2 ui_element_calc_pos(
+    const vec2* element_size,
+    const vec2* parent_size,
+    const vec2* parent_pos,
+    const UI_Alignment alignment
+) {
+    return (vec2){
+        .x = ui_element_calc_axis_pos(
+            element_size->x, parent_size->x, parent_pos->x,
+            ui_element_alignment_x_to_float(alignment.x)
+        ),
+        .y = ui_element_calc_axis_pos(
+            element_size->y, parent_size->y, parent_pos->y,
+            ui_element_alignment_y_to_float(alignment.y)
+        ),
+    };
+}
+
+void ui_context_pass_size(const size_t index, const UI_Element* parent) {
+    if (index >= ui_ctx->elem_count) return;
+    UI_Element* element = &ui_ctx->elements[index];
+
+    const vec2 parent_size = parent == NULL
+                                 ? ui_ctx->screen_size
+                                 : parent->calc_size;
+
+    element->calc_size = ui_element_calc_size(
+        &element->config.layout.size, &parent_size
+    );
+
+    switch (element->type) {
+    case UI_ELEMENT_TYPE_LAYOUT:
+        for (size_t i = 0; i < element->child_count; i++) {
+            ui_context_pass_size(element->first_child_index + i, element);
+        }
+        break;
+    case UI_ELEMENT_TYPE_TEXT:
+        //TODO: add a function to get width of a text and a given font , replace these hard coded values
+        element->calc_size = (vec2){element->text.length * 4, 16.f};
+        break;
+    default:
+        break;
+    }
+}
+
+void ui_context_pass_position(
+    const size_t index,
+    const UI_Element* parent,
+    vec2* parent_childs_pos
+) {
+    if (index >= ui_ctx->elem_count) return;
+    UI_Element* element = &ui_ctx->elements[index];
+
+    vec2 parent_pos, parent_size;
+    UI_Alignment alignment = {0};
+    if (parent == NULL) {
+        parent_pos = VEC2_ZERO;
+        parent_size = ui_ctx->screen_size;
+    } else {
+        parent_pos = parent->calc_pos;
+        parent_size = parent->calc_size;
+        alignment = parent->config.layout.child_align;
+    }
+#define CHILD_GAP 0.f //TODO: this can later on be defined in the UI_Element_Layout
+    if (parent_childs_pos == NULL) {
+        //this is the perfect center aligned pos - can be overwritten later on
+        element->calc_pos = ui_element_calc_pos(
+            &element->calc_size, &parent_size, &parent_pos, alignment
+        );
+    } else {
+        element->calc_pos = *parent_childs_pos;
+        element->calc_pos.x -= element->calc_size.x * 0.5f;
+        //TODO: support both ui flow directions - this is currently only vertical direction
+        // *parent_childs_pos = vec2_add_vec2(*parent_childs_pos, element->calc_size);
+        parent_childs_pos->y -= element->calc_size.y + CHILD_GAP;
+    }
+
+    switch (element->type) {
+    // for elements with (multiple) children
+    case UI_ELEMENT_TYPE_LAYOUT:
+        if (element->child_count == 1) {
+            ui_context_pass_position(element->first_child_index, element, NULL);
+            break;
+        }
+
+        //0. decide for ONE axis - this is the axis of ui direction / ui flow
+        //TODO: this needs to be done as enum for both directions!
+        //for now we are hard coding vertical flow (top -> bottom)
+        float max_child_width = 0.f;
+        float total_child_height = {0.f};
+
+        // 1. calculate the entire height / width of the elements combined
+        for (size_t i = 0; i < element->child_count; i++) {
+            const UI_Element* child = &ui_ctx->elements[element->first_child_index
+                + i];
+            max_child_width = SDL_max(max_child_width, child->calc_size.x);
+            total_child_height +=  child->calc_size.y;
+        }
+        total_child_height += CHILD_GAP * (float)(element->child_count-1);
+
+        //2. get the top position
+        vec2 child_pos = element->calc_pos;
+        child_pos.x = element->calc_pos.x + element->calc_size.x * 0.5f;
+        child_pos.y += total_child_height;
+
+        //3. recurse and adjust child_pos
+        for (size_t i = 0; i < element->child_count; i++) {
+            ui_context_pass_position(element->first_child_index + i, element, &child_pos);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+//TODO: remove the font dependency
+void ui_context_draw(Rect_Buffer* rect_buffer, Font* font, const size_t index) {
+    if (index >= ui_ctx->elem_count) return;
+    const UI_Element* element = &ui_ctx->elements[index];
+
+    const Nine_Slice nine_slice_rounded = {
+        .total_size = 32.f,
+        .border_size = 10.f,
+        .quad = {
+            .min = (vec2){0.f, .75f},
+            .max = (vec2){.25f, 1.f},
+        }
+    };
+
+    float sort_order = (float) element->depth;
+
+
+    switch (element->type) {
+    case UI_ELEMENT_TYPE_LAYOUT:
+        render_nine_slice(
+            rect_buffer,
+            vec2_add_vec2(element->calc_pos, vec2_mul_float(element->calc_size,
+                .5f)),
+            element->calc_size,
+            element->config.bg_color,
+            (float)element->depth,
+            2,
+            &nine_slice_rounded,
+            true
+        );
+        for (size_t i = 0; i < element->child_count; i++) {
+            ui_context_draw(rect_buffer, font, element->first_child_index + i);
+        }
+        break;
+    case UI_ELEMENT_TYPE_TEXT:
+        render_text(
+            element->text, font, vec2_add_vec2(
+                element->calc_pos, (vec2){
+                    element->calc_size.x * -0.5f, element->calc_size.y * 0.25f
+                }
+            ), element->config.color, 1.f,
+            sort_order+.1f, rect_buffer);
+    default:
+        break;
     }
 }
 
@@ -1800,7 +2028,12 @@ void init_app_ptr(App* app) {
 static bool app_init(App* app) {
     const char* base_path = SDL_GetBasePath();
     asset_path_init(base_path, &app->asset_path);
-    ui_context_init();
+    ui_context_init(
+        (vec2){
+            (float)app->window.width,
+            (float)app->window.height
+        }
+    );
 
 #if defined(__DEBUG__)
     if (!hot_reload_init(&app->hot_reload, base_path, &app->api, &app->game))
@@ -1809,6 +2042,7 @@ static bool app_init(App* app) {
     if (!game_init(&app->api, &app->game, ui_ctx)) return false;
 #endif
 
+    const i32 num_textures = 4;
     Raw_Texture* raw_textures[] = {
         font_load_for_array(
             temp_path_append(app->asset_path.str, "Born2bSportyV2.ttf"),
@@ -1821,9 +2055,12 @@ static bool app_init(App* app) {
         raw_texture_from_file(
             temp_path_append(app->asset_path.str, "nine_slice_test.png")
         ),
+        raw_texture_from_file(
+            temp_path_append(app->asset_path.str, "white.png")
+        ),
     };
     app->texture_array = gl_texture_array_generate(
-        &raw_textures[0], 3,
+        &raw_textures[0], num_textures,
         128, 128, 4, default_texture_config(), true
     );
 
@@ -1927,6 +2164,9 @@ static void app_draw(App* app) {
     viewport_bind(&app->viewport_ui);
     reset_rect_buffer(&app->rect_buffer);
 
+    ui_ctx->screen_size = ivec2_to_vec2(app->viewport_ui.frame_buffer_size);
+
+    //EXPERIMENTAL UI LAYOUTING
     //TODO: split into game_draw and game_draw_ui
 #if defined(__DEBUG__)
     app->hot_reload.game_draw(&app->game);
@@ -1935,16 +2175,20 @@ static void app_draw(App* app) {
 #endif
 
     ui_tree_reindex_depth_first_to_breadth_first();
-    ui_tree_print(0, 0);
 
+    ui_context_pass_size(0, NULL);
+    ui_context_pass_position(0, NULL, NULL);
+    ui_context_draw(&app->rect_buffer, &app->font1, 0);
     ui_context_clear();
 
-    //Rects
+
+
     const float viewport_width = (float)app->viewport_ui.frame_buffer_size.x;
     const float viewport_height = (float)app->viewport_ui.frame_buffer_size.y;
+
+    #if defined(DRAW_INITIAL_RAW_UI)
     const float window_width = (float)app->window.width;
     const float window_height = (float)app->window.height;
-
     float font_scale = 1.f;
     //this approach would allow for consistent font size among all viewport
     //divisors - but it will come with other caveats - we still need to
@@ -1962,7 +2206,7 @@ static void app_draw(App* app) {
             viewport_height,
         },
         COLOR_WHITE,
-        font_scale, 1.0f, &app->rect_buffer
+        font_scale, RECT_MAX_SORT_ORDER, &app->rect_buffer
     );
 
     const Nine_Slice nine_slice_rounded = {
@@ -2011,7 +2255,7 @@ static void app_draw(App* app) {
     );
 
     font_scale = 2.f;
-    render_text(
+    render_text_outlined(
         STRING("MICRO MONARCH"),
         font,
         (vec2){
@@ -2019,7 +2263,7 @@ static void app_draw(App* app) {
             center.y + square_size * 0.25f,
         },
         COLOR_YELLOW,
-        font_scale, 1.0f, &app->rect_buffer
+        font_scale, 4.5f, &app->rect_buffer, 1.0f, COLOR_BLUE
     );
     const vec2 button_dist = (vec2){0, square_size * .1f};
     vec2 button_pos = vec2_add_vec2(center, button_dist);
@@ -2047,7 +2291,8 @@ static void app_draw(App* app) {
             font,
             vec2_sub_vec2(
                 button_pos, (vec2){
-                    (float)strings[i].length * font_scale * .25f * font->size,
+                    (float)strings[i].length * font_scale * .25f * font->
+                    size,
                     0
                 }
             ),
@@ -2056,9 +2301,9 @@ static void app_draw(App* app) {
         );
         button_pos = vec2_sub_vec2(button_pos, button_dist);
     }
+#endif
 
-    ////////
-
+    /* UI BOILERPLATE **********************************************************/
     build_rect_vertex_buffer(&app->rect_buffer, &app->rect_vertex_buffer);
     glUseProgram(app->rect_shader.id);
     const mat4 ortho_mat = mat4_ortho(

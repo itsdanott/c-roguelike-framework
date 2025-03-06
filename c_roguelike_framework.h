@@ -236,10 +236,38 @@ static void arena_clear(Arena* arena) {
 }
 
 /* UI *************************************************************************/
+typedef struct UI_Context UI_Context;
+extern UI_Context* ui_ctx;
+
+#define UI_MAX_ELEMENTS 2048
+#define UI_STRING_ARENA_SIZE 2048
+
+#define UI_SIZE_FIXED(px)(UI_Element_Size){                                    \
+    .mode = UI_ELEMENT_SIZE_MODE_FIXED,                                        \
+    .value = px                                                                \
+}                                                                              \
+
+#define UI_SIZE_PERCENT(percent)(UI_Element_Size){                             \
+    .mode = UI_ELEMENT_SIZE_MODE_PERCENT,                                      \
+    .value = percent                                                           \
+}                                                                              \
+
+#define UI(...) \
+    for ( \
+        int UI_ELEM_MACRO_ITER = ((ui_element_start(), ui_element_set_config((UI_Element_Config)__VA_ARGS__)), 0);\
+        UI_ELEM_MACRO_ITER < 1;\
+        UI_ELEM_MACRO_ITER++, ui_element_end()\
+    )\
+
+#define UI_ID(str) short_str_hash(STRING(str))
+
+#define UI_TEXT(text, ...) ui_text_element(text, (UI_Text_Config)__VA_ARGS__)
+
+#define UI_IMAGE(texture_id, ...) ui_image_element(texture_id, (UI_Image_Config){ __VA_ARGS__ })
+
 typedef enum {
     UI_ELEMENT_TYPE_NONE,
-    //Layout can either be empty elements or containers
-    UI_ELEMENT_TYPE_LAYOUT,
+    UI_ELEMENT_TYPE_LAYOUT, // Layout can either be empty elements or containers
     UI_ELEMENT_TYPE_TEXT,
     UI_ELEMENT_TYPE_IMAGE,
 } UI_Element_Type;
@@ -252,27 +280,87 @@ typedef enum {
 
 typedef struct {
     UI_Element_Size_Mode mode;
+    float value; //for percent: 0-1=0-100%
 } UI_Element_Size;
 
 typedef struct {
+    UI_Element_Size width;
+    UI_Element_Size height;
 } UI_Element_Sizes;
 
+typedef enum {
+    UI_ELEMENT_ALIGNMENT_X_CENTER,
+    UI_ELEMENT_ALIGNMENT_X_LEFT,
+    UI_ELEMENT_ALIGNMENT_X_RIGHT,
+} UI_Alignment_X;
+
+typedef enum {
+    UI_ELEMENT_ALIGNMENT_Y_CENTER,
+    UI_ELEMENT_ALIGNMENT_Y_BOTTOM,
+    UI_ELEMENT_ALIGNMENT_Y_TOP,
+} UI_Alignment_Y;
+
+typedef enum {
+    UI_LAYOUT_DIRECTION_LEFT_TO_RIGHT,
+    UI_LAYOUT_DIRECTION_TOP_TO_BOTTOM,
+} UI_Layout_Direction;
+
 typedef struct {
+    UI_Alignment_X x;
+    UI_Alignment_Y y;
+} UI_Alignment;
+
+typedef struct {
+    UI_Layout_Direction direction;
+    UI_Element_Sizes size;
+    UI_Alignment child_align;
+} UI_Element_Layout;
+
+//For now this is a member of UI_Element, holding the user defined ID, for texts
+//and images the id needs to be copied over - this is not ideal - we need a
+//proper solution for this!
+typedef struct{
+    u32 id;
+    UI_Element_Layout layout;
+    vec3 color;
+    vec3 bg_color;
+} UI_Element_Config;
+
+typedef struct {
+    u32 id;
+    u32 font_index;
+    String text;
+    float scale;
+    UI_Alignment alignment;
+    vec3 color;
+    //TODO: text wrapping, outline etc
+} UI_Text_Config;
+
+typedef enum {
+    UI_IMAGE_SIZE_MODE_KEEP_ASPECT,
+    UI_IMAGE_SIZE_MODE_STRETCH,
+} UI_Image_Size_Mode;
+
+typedef struct {
+    u32 id;
+    UI_Image_Size_Mode size_mode;
+} UI_Image_Config;
+
+typedef struct {
+    size_t index;
     size_t depth;
     UI_Element_Type type;
+    UI_Element_Config config;
     String text;
     size_t texture_id;
-    vec3 bg_color;
-    vec3 color;
-    size_t first_child_id;
+    size_t first_child_index;
     size_t child_count;
-    UI_Element_Sizes size;
+    vec2 calc_size;
+    vec2 calc_pos;
 } UI_Element;
 
-#define UI_MAX_ELEMENTS 2048
-#define UI_STRING_ARENA_SIZE 2048
-
-typedef struct {
+struct UI_Context {
+    vec2 screen_size;
     UI_Element elements[UI_MAX_ELEMENTS];
     size_t tree_depth;
     size_t elem_count;
@@ -281,30 +369,23 @@ typedef struct {
     UI_Element temp_queue[UI_MAX_ELEMENTS];
     size_t temp_queue_count;
     Arena string_arena;
-} UI_Context;
-
-#define UI_LAYOUT(...) ui_element_start(); __VA_ARGS__ ui_element_end()
-#define UI_TEXT(text) UI_LAYOUT(ui_element_set_text(text);)
-#define UI_IMAGE(texture_id) UI_LAYOUT(ui_element_set_image(texture_id);)
-
-extern UI_Context* ui_ctx;
+};
 
 static void ui_element_start() {
     SDL_assert(ui_ctx->elem_count + 1 <= UI_MAX_ELEMENTS);
-    const size_t new_id = ui_ctx->elem_count;
+    const size_t new_index = ui_ctx->elem_count;
 
     //If we already have a temp elem - enqueue it as we are going one depth
     //level lower
     if (ui_ctx->temp_elem.type != UI_ELEMENT_TYPE_NONE) {
         if (ui_ctx->temp_elem.child_count == 0) {
-            ui_ctx->temp_elem.first_child_id = new_id;
+            ui_ctx->temp_elem.first_child_index = new_index;
         }
         ui_ctx->temp_elem.child_count++;
-        ui_ctx->temp_queue[ui_ctx->temp_queue_count++] =
-            ui_ctx->temp_elem;
+        ui_ctx->temp_queue[ui_ctx->temp_queue_count++] = ui_ctx->temp_elem;
     }
     ui_ctx->temp_elem = (UI_Element){
-        .id = new_id,
+        .index = new_index,
         .type = UI_ELEMENT_TYPE_LAYOUT,
         .depth = ui_ctx->temp_depth,
     };
@@ -313,25 +394,39 @@ static void ui_element_start() {
     ui_ctx->tree_depth = SDL_max(ui_ctx->temp_depth, ui_ctx->tree_depth);
 }
 
-static void ui_element_set_text(const String text) {
-    SDL_assert(ui_ctx->temp_elem.type == UI_ELEMENT_TYPE_LAYOUT);
-    ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_TEXT;
-    ui_ctx->temp_elem.text = text;
-}
-
-static void ui_element_set_image(const size_t texture_id) {
-    SDL_assert(ui_ctx->temp_elem.type == UI_ELEMENT_TYPE_LAYOUT);
-    ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_IMAGE;
-    ui_ctx->temp_elem.texture_id = texture_id;
-}
-
 static void ui_element_end() {
-    ui_ctx->elements[ui_ctx->temp_elem.id] = ui_ctx->temp_elem;
+    ui_ctx->elements[ui_ctx->temp_elem.index] = ui_ctx->temp_elem;
     if (ui_ctx->temp_queue_count > 0) {
         ui_ctx->temp_queue_count--;
         ui_ctx->temp_elem = ui_ctx->temp_queue[ui_ctx->temp_queue_count];
     }
     ui_ctx->temp_depth--;
+}
+
+static void ui_element_set_config(const UI_Element_Config config) {
+    ui_ctx->temp_elem.config = config;
+}
+
+static void ui_text_element(const String text, const UI_Text_Config config) {
+    ui_element_start();
+    ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_TEXT;
+    ui_ctx->temp_elem.text = text;
+    ui_ctx->temp_elem.config.id = config.id;
+    ui_ctx->temp_elem.config.color = config.color;
+    //TODO: implement config
+    ui_element_end();
+}
+
+static void ui_image_element(
+    const u32 texture_id,
+    const UI_Image_Config config
+) {
+    ui_element_start();
+    ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_IMAGE;
+    ui_ctx->temp_elem.texture_id = texture_id;
+    ui_ctx->temp_elem.config.id = config.id;
+    //TODO: implement config
+    ui_element_end();
 }
 
 /* PUBLIC API ******************************************************************/

@@ -8,17 +8,44 @@ UI_Context* ui_ctx;
 #endif
 
 void draw_main_menu() {
-    UI_LAYOUT(
-        UI_LAYOUT(
-            UI_TEXT(STRING("NEW GAME"));
-            UI_IMAGE(42);
-        );
-
-        UI_LAYOUT(
-            UI_TEXT(STRING("LOAD GAME"));
-            UI_IMAGE(69);
-        );
-    );
+    UI({
+        .id = UI_ID("Root"),
+        .layout = {
+            .size = {
+                .width = UI_SIZE_PERCENT(1.f),
+                .height = UI_SIZE_PERCENT(1.f)
+            },
+            .child_align = {
+                    .x = UI_ELEMENT_ALIGNMENT_X_CENTER,
+            },
+        },
+        .bg_color = COLOR_GRAY_DARK,
+    }) {
+        UI({
+            .id = UI_ID("MainMenu"),
+            .layout = {
+                .size = {
+                    .width = UI_SIZE_PERCENT(.5f),
+                    .height = UI_SIZE_PERCENT(.5f),
+                },
+            },
+            .bg_color = COLOR_RED,
+        }) {
+            UI_TEXT(STRING("Hello world!"), {
+                .id = UI_ID("TitleString"),
+                .alignment = {
+                    .x = UI_ELEMENT_ALIGNMENT_X_CENTER,
+                }
+            });
+            UI_TEXT(STRING("7drl 2025!"), {
+                .id = UI_ID("TitleString"),
+                .alignment = {
+                    .x = UI_ELEMENT_ALIGNMENT_X_CENTER,
+                },
+                .color = COLOR_GREEN,
+            });
+        }
+    }
 }
 
 /* PUBLIC GAME API IMPLEMENTATION *********************************************/
