@@ -1574,11 +1574,11 @@ float ui_element_calc_axis_pos(
 
 float ui_element_alignment_x_to_float(const UI_Alignment_X alignment) {
     switch (alignment) {
-    case UI_ELEMENT_ALIGNMENT_X_CENTER:
+    case UI_ALIGNMENT_X_CENTER:
         return 0.f;
-    case UI_ELEMENT_ALIGNMENT_X_LEFT:
+    case UI_ALIGNMENT_X_LEFT:
         return -1.f;
-    case UI_ELEMENT_ALIGNMENT_X_RIGHT:
+    case UI_ALIGNMENT_X_RIGHT:
         return 1.f;
     default:
         SDL_assert(0);
@@ -1588,11 +1588,11 @@ float ui_element_alignment_x_to_float(const UI_Alignment_X alignment) {
 
 float ui_element_alignment_y_to_float(const UI_Alignment_Y alignment) {
     switch (alignment) {
-    case UI_ELEMENT_ALIGNMENT_Y_CENTER:
+    case UI_ALIGNMENT_Y_CENTER:
         return 0.f;
-    case UI_ELEMENT_ALIGNMENT_Y_BOTTOM:
+    case UI_ALIGNMENT_Y_BOTTOM:
         return -1.f;
-    case UI_ELEMENT_ALIGNMENT_Y_TOP:
+    case UI_ALIGNMENT_Y_TOP:
         return 1.f;
     default:
         SDL_assert(0);

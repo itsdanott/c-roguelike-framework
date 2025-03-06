@@ -16,7 +16,7 @@ void draw_main_menu() {
                 .height = UI_SIZE_PERCENT(1.f)
             },
             .child_align = {
-                    .x = UI_ELEMENT_ALIGNMENT_X_CENTER,
+                    .x = UI_ALIGNMENT_X_CENTER,
             },
         },
         .bg_color = COLOR_GRAY_DARK,
@@ -34,13 +34,13 @@ void draw_main_menu() {
             UI_TEXT(STRING("Hello world!"), {
                 .id = UI_ID("TitleString"),
                 .alignment = {
-                    .x = UI_ELEMENT_ALIGNMENT_X_CENTER,
+                    .x = UI_ALIGNMENT_X_CENTER,
                 }
             });
             UI_TEXT(STRING("7drl 2025!"), {
                 .id = UI_ID("TitleString"),
                 .alignment = {
-                    .x = UI_ELEMENT_ALIGNMENT_X_CENTER,
+                    .x = UI_ALIGNMENT_X_CENTER,
                 },
                 .color = COLOR_GREEN,
             });
