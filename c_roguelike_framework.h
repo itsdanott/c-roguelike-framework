@@ -41,6 +41,13 @@ static String make_string(const char* str) {
 #define STRING(str) make_string(str)
 
 /* MATH ***********************************************************************/
+#define VEC2_ZERO (vec2){0}
+#define VEC3_ZERO (vec3){0,0,0}
+#define VEC4_ZERO (vec4){0,0,0,0}
+#define VEC2_ONE  (vec2){1,1}
+#define VEC3_ONE  (vec3){1,1,1}
+#define VEC4_ONE  (vec4){1,1,1,1}
+
 typedef struct {
     i32 x, y;
 } ivec2;
@@ -112,6 +119,12 @@ static vec2 vec2_sub_float(const vec2 a, const float b) {
     };
 }
 
+static vec2 ivec2_to_vec2(const ivec2 a) {
+    return (vec2){
+        (float)a.x, (float)a.y
+    };
+}
+
 //column-major mat
 //that means we access elements by matrix[column][row] and what appears to be
 //the first "row" when initializing a matrix is actually the first column.
@@ -154,6 +167,23 @@ static vec3 vec3_lerp(const vec3 a, const vec3 b, const float t) {
         float_lerp(a.y, b.y, t),
         float_lerp(a.z, b.z, t),
     };
+}
+
+
+//djb2 hash function for strings with <= 32 characters
+//by Daniel J. Bernstein (Public Domain)
+//http://www.cse.yorku.ca/~oz/hash.html
+static u32 short_str_hash(String str) {
+    SDL_assert(str.length <= 32);
+
+    u32 hash = 5381;
+    int c;
+
+    while ((c = *str.chars++)) {
+        hash = ((hash << 5) + hash) + (u8)c; // hash * 33 + c
+    }
+
+    return hash;
 }
 
 /* COLORS *********************************************************************/
@@ -222,16 +252,12 @@ typedef enum {
 
 typedef struct {
     UI_Element_Size_Mode mode;
-    float size; //for percent: 0-1=0-100%
 } UI_Element_Size;
 
 typedef struct {
-    UI_Element_Size horizontal;
-    UI_Element_Size vertical;
 } UI_Element_Sizes;
 
 typedef struct {
-    size_t id;
     size_t depth;
     UI_Element_Type type;
     String text;

@@ -1076,10 +1076,10 @@ void build_rect_vertex_buffer(
 #undef MAKE_CORNER_VERTEX
         vertex_buffer->vertices[vertex_index + 0] = bottom_left;
         vertex_buffer->vertices[vertex_index + 1] = bottom_right;
-        vertex_buffer->vertices[vertex_index + 2] = top_left;
-        vertex_buffer->vertices[vertex_index + 3] = top_left;
-        vertex_buffer->vertices[vertex_index + 4] = top_right;
-        vertex_buffer->vertices[vertex_index + 5] = bottom_right;
+        vertex_buffer->vertices[vertex_index + 2] = top_right;
+        vertex_buffer->vertices[vertex_index + 3] = top_right;
+        vertex_buffer->vertices[vertex_index + 4] = top_left;
+        vertex_buffer->vertices[vertex_index + 5] = bottom_left;
         vertex_index += 6;
     }
     SDL_assert(vertex_index <= RECT_VERTEX_BUFFER_CAPACITY);
@@ -1195,7 +1195,7 @@ void render_text_outlined(
     const vec3 outline_color
 ) {
     render_text(text, font, pos, color, scale, sort_order, rect_buffer);
-    sort_order -= 1.0f;
+    sort_order -= 0.1f;
 
     render_text(
         text, font, (vec2){pos.x + outline_offset, pos.y},
@@ -1222,9 +1222,10 @@ typedef struct {
     Tex_Coords_Quad quad;
 } Nine_Slice;
 
+
 void render_nine_slice(
     Rect_Buffer* rect_buffer,
-    const vec2 pos,
+    const vec2 pos, // centered (equivalent to pivot = 0.5, 0.5)
     const vec2 size,
     const vec3 color,
     const float sort_order,
