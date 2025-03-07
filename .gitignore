@@ -1,4 +1,5 @@
 /.idea
 /cmake-*
 /bin-*
-build-deploy-itch.bat
+build-deploy-itch-*
+/deploy

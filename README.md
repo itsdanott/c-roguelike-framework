@@ -24,6 +24,7 @@ other.
 - Text Rendering
 - Rect Rendering
 - Hot Reloading 
+- Simple UI Layouting & Immediate Mode UI
 
 ## TODO
 - replace stb function defs with SDL ones to avoid C runtime library

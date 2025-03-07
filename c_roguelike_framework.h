@@ -119,6 +119,13 @@ static vec2 vec2_sub_float(const vec2 a, const float b) {
     };
 }
 
+static vec2 vec2_div_float(const vec2 a, const float b) {
+    return (vec2){
+        a.x / b,
+        a.y / b,
+    };
+}
+
 static vec2 ivec2_to_vec2(const ivec2 a) {
     return (vec2){
         (float)a.x, (float)a.y
@@ -254,7 +261,7 @@ extern UI_Context* ui_ctx;
 
 #define UI(...) \
     for ( \
-        int UI_ELEM_MACRO_ITER = ((ui_element_start(), ui_element_set_config((UI_Element_Config)__VA_ARGS__)), 0);\
+        int UI_ELEM_MACRO_ITER = ((ui_element_start(), ui_container_element((UI_Container_Config)__VA_ARGS__)), 0);\
         UI_ELEM_MACRO_ITER < 1;\
         UI_ELEM_MACRO_ITER++, ui_element_end()\
     )\
@@ -263,11 +270,11 @@ extern UI_Context* ui_ctx;
 
 #define UI_TEXT(text, ...) ui_text_element(text, (UI_Text_Config)__VA_ARGS__)
 
-#define UI_IMAGE(texture_id, ...) ui_image_element(texture_id, (UI_Image_Config){ __VA_ARGS__ })
+#define UI_IMAGE(texture_id, ...) ui_image_element(texture_id, (UI_Image_Config)__VA_ARGS__ )
 
 typedef enum {
     UI_ELEMENT_TYPE_NONE,
-    UI_ELEMENT_TYPE_LAYOUT, // Layout can either be empty elements or containers
+    UI_ELEMENT_TYPE_CONTAINER,
     UI_ELEMENT_TYPE_TEXT,
     UI_ELEMENT_TYPE_IMAGE,
 } UI_Element_Type;
@@ -310,30 +317,35 @@ typedef struct {
     UI_Alignment_Y y;
 } UI_Alignment;
 
+#define UI_ANCHOR_CENTER (vec2){ .x = 0.5f, .y = 0.5f }
+
+#define UI_POS(pos_x,pos_y) (vec2) { .x = pos_x, .y = pos_y }
+#define UI_SIZE(width,height) (vec2) { .x = width, .y = height }
+
 typedef struct {
-    UI_Layout_Direction direction;
-    UI_Element_Sizes size;
-    UI_Alignment child_align;
+    vec2 anchor;
+    vec2 offset;
+    vec2 size;
 } UI_Element_Layout;
 
-//For now this is a member of UI_Element, holding the user defined ID, for texts
-//and images the id needs to be copied over - this is not ideal - we need a
-//proper solution for this!
 typedef struct{
     u32 id;
     UI_Element_Layout layout;
-    vec3 color;
     vec3 bg_color;
-} UI_Element_Config;
+} UI_Container_Config;
 
 typedef struct {
     u32 id;
+    UI_Element_Layout layout;
     u32 font_index;
     String text;
     float scale;
-    UI_Alignment alignment;
+    UI_Alignment align;
     vec3 color;
-    //TODO: text wrapping, outline etc
+    vec3 outline_color;
+    float outline;
+    bool bg_slice;
+    //TODO: text wrapping rules (e.g. FIT and NO_WRAP)
 } UI_Text_Config;
 
 typedef enum {
@@ -343,21 +355,37 @@ typedef enum {
 
 typedef struct {
     u32 id;
+    i32 texture_id;
+    UI_Element_Layout layout;
     UI_Image_Size_Mode size_mode;
+    vec3 color;
+    vec2 pivot;
 } UI_Image_Config;
 
 typedef struct {
     size_t index;
     size_t depth;
     UI_Element_Type type;
-    UI_Element_Config config;
-    String text;
-    size_t texture_id;
+    UI_Element_Layout layout;
+    union {
+        UI_Container_Config container;
+        UI_Text_Config text;
+        UI_Image_Config image;
+    } config;
     size_t first_child_index;
     size_t child_count;
     vec2 calc_size;
     vec2 calc_pos;
 } UI_Element;
+
+// This is for converting the 'virtual 1000x1000 pixel' values to the actual
+// ui_viewport's pixel values
+typedef struct {
+    float scale_fac; //decimal factor - to avoid division by 1000.f everywhere
+    float size; //actual viewport pixel size of a square edge
+    vec2 center;
+    vec2 origin;//Bottom Left Pos
+} UI_Render_Square;
 
 struct UI_Context {
     vec2 screen_size;
@@ -369,6 +397,7 @@ struct UI_Context {
     UI_Element temp_queue[UI_MAX_ELEMENTS];
     size_t temp_queue_count;
     Arena string_arena;
+    UI_Render_Square square;
 };
 
 static void ui_element_start() {
@@ -386,7 +415,7 @@ static void ui_element_start() {
     }
     ui_ctx->temp_elem = (UI_Element){
         .index = new_index,
-        .type = UI_ELEMENT_TYPE_LAYOUT,
+        .type = UI_ELEMENT_TYPE_CONTAINER,
         .depth = ui_ctx->temp_depth,
     };
     ui_ctx->elem_count++;
@@ -403,17 +432,24 @@ static void ui_element_end() {
     ui_ctx->temp_depth--;
 }
 
-static void ui_element_set_config(const UI_Element_Config config) {
-    ui_ctx->temp_elem.config = config;
+static void ui_element_set_layout(const UI_Element_Layout layout) {
+    ui_ctx->temp_elem.layout = layout;
 }
 
-static void ui_text_element(const String text, const UI_Text_Config config) {
+static void ui_container_element(const UI_Container_Config config) {
+    ui_ctx->temp_elem.config.container = config;
+    ui_element_set_layout(config.layout);
+}
+
+static void ui_text_element(
+    const String text,
+    const UI_Text_Config text_config
+) {
     ui_element_start();
     ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_TEXT;
-    ui_ctx->temp_elem.text = text;
-    ui_ctx->temp_elem.config.id = config.id;
-    ui_ctx->temp_elem.config.color = config.color;
-    //TODO: implement config
+    ui_ctx->temp_elem.config.text = text_config;
+    ui_ctx->temp_elem.config.text.text = text;
+    ui_element_set_layout(text_config.layout);
     ui_element_end();
 }
 
@@ -423,9 +459,9 @@ static void ui_image_element(
 ) {
     ui_element_start();
     ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_IMAGE;
-    ui_ctx->temp_elem.texture_id = texture_id;
-    ui_ctx->temp_elem.config.id = config.id;
-    //TODO: implement config
+    ui_ctx->temp_elem.config.image = config;
+    ui_ctx->temp_elem.config.image.texture_id = texture_id;
+    ui_element_set_layout(config.layout);
     ui_element_end();
 }
 
