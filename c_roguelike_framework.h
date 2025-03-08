@@ -176,7 +176,6 @@ static vec3 vec3_lerp(const vec3 a, const vec3 b, const float t) {
     };
 }
 
-
 //djb2 hash function for strings with <= 32 characters
 //by Daniel J. Bernstein (Public Domain)
 //http://www.cse.yorku.ca/~oz/hash.html
@@ -197,8 +196,11 @@ static u32 short_str_hash(String str) {
 #define COLOR_RED			(vec3){1.00f,0.00f,0.00f}
 #define COLOR_GREEN			(vec3){0.00f,1.00f,0.00f}
 #define COLOR_BLUE			(vec3){0.00f,0.00f,1.00f}
+#define COLOR_CYAN   		(vec3){0.00f,1.00f,1.00f}
+#define COLOR_TEAL          (vec3){0.00f,0.50f,0.50f}
 #define COLOR_YELLOW		(vec3){1.00f,1.00f,0.00f}
 #define COLOR_MAGENTA		(vec3){1.00f,0.00f,1.00f}
+#define COLOR_PURPLE		(vec3){0.50f,0.00f,0.50f}
 #define COLOR_BLACK			(vec3){0.00f,0.00f,0.00f}
 #define COLOR_GRAY			(vec3){0.50f,0.50f,0.50f}
 #define COLOR_GRAY_BRIGHT	(vec3){0.75f,0.75f,0.75f}
@@ -242,6 +244,22 @@ static void arena_clear(Arena* arena) {
     arena->offset = 0;
 }
 
+/* TEX COORDS *****************************************************************/
+//To avoid C's array weirdness we'll use a struct for tex_coords instead of an
+//array(as we would in e.g. Odin)
+typedef struct {
+    vec2 bottom_left, bottom_right, top_left, top_right;
+} Tex_Coords;
+
+static Tex_Coords default_tex_coords() {
+    return (Tex_Coords){
+        .bottom_left = {0.0f, 0.0f},
+        .bottom_right = {1.0f, 0.0f},
+        .top_left = {0.0f, 1.0f},
+        .top_right = {1.0f, 1.0f},
+    };
+}
+
 /* UI *************************************************************************/
 typedef struct UI_Context UI_Context;
 extern UI_Context* ui_ctx;
@@ -252,25 +270,28 @@ extern UI_Context* ui_ctx;
 #define UI_SIZE_FIXED(px)(UI_Element_Size){                                    \
     .mode = UI_ELEMENT_SIZE_MODE_FIXED,                                        \
     .value = px                                                                \
-}                                                                              \
-
+}
 #define UI_SIZE_PERCENT(percent)(UI_Element_Size){                             \
     .mode = UI_ELEMENT_SIZE_MODE_PERCENT,                                      \
     .value = percent                                                           \
-}                                                                              \
-
+}
 #define UI(...) \
     for ( \
         int UI_ELEM_MACRO_ITER = ((ui_element_start(), ui_container_element((UI_Container_Config)__VA_ARGS__)), 0);\
         UI_ELEM_MACRO_ITER < 1;\
         UI_ELEM_MACRO_ITER++, ui_element_end()\
-    )\
-
+    )
 #define UI_ID(str) short_str_hash(STRING(str))
+#define UI_ID_STR(str) short_str_hash(str)
 
 #define UI_TEXT(text, ...) ui_text_element(text, (UI_Text_Config)__VA_ARGS__)
 
-#define UI_IMAGE(texture_id, ...) ui_image_element(texture_id, (UI_Image_Config)__VA_ARGS__ )
+#define UI_IMAGE(...) ui_image_element((UI_Image_Config)__VA_ARGS__ )
+
+#define UI_ANCHOR_CENTER (vec2){ .x = 0.5f, .y = 0.5f }
+//TODO: decide about these macros - they offer simpler writing but are error-prone (implic type casting etc)
+#define UI_POS(pos_x,pos_y) (vec2) { .x = pos_x, .y = pos_y }
+#define UI_SIZE(width,height) (vec2) { .x = width, .y = height }
 
 typedef enum {
     UI_ELEMENT_TYPE_NONE,
@@ -278,22 +299,6 @@ typedef enum {
     UI_ELEMENT_TYPE_TEXT,
     UI_ELEMENT_TYPE_IMAGE,
 } UI_Element_Type;
-
-typedef enum {
-    UI_ELEMENT_SIZE_MODE_PERCENT,
-    UI_ELEMENT_SIZE_MODE_FIXED, //pixel size
-    UI_ELEMENT_SIZE_MODE_CONTENT
-} UI_Element_Size_Mode;
-
-typedef struct {
-    UI_Element_Size_Mode mode;
-    float value; //for percent: 0-1=0-100%
-} UI_Element_Size;
-
-typedef struct {
-    UI_Element_Size width;
-    UI_Element_Size height;
-} UI_Element_Sizes;
 
 typedef enum {
     UI_ALIGNMENT_X_CENTER,
@@ -307,37 +312,40 @@ typedef enum {
     UI_ALIGNMENT_Y_TOP,
 } UI_Alignment_Y;
 
-typedef enum {
-    UI_LAYOUT_DIRECTION_LEFT_TO_RIGHT,
-    UI_LAYOUT_DIRECTION_TOP_TO_BOTTOM,
-} UI_Layout_Direction;
-
 typedef struct {
     UI_Alignment_X x;
     UI_Alignment_Y y;
 } UI_Alignment;
 
-#define UI_ANCHOR_CENTER (vec2){ .x = 0.5f, .y = 0.5f }
-
-#define UI_POS(pos_x,pos_y) (vec2) { .x = pos_x, .y = pos_y }
-#define UI_SIZE(width,height) (vec2) { .x = width, .y = height }
-
 typedef struct {
     vec2 anchor;
     vec2 offset;
     vec2 size;
+    //TODO: consider generalizing pivot(useful everywhere - not only for UI_Image)
 } UI_Element_Layout;
-
-typedef struct{
-    u32 id;
-    UI_Element_Layout layout;
-    vec3 bg_color;
-} UI_Container_Config;
 
 typedef struct {
     u32 id;
     UI_Element_Layout layout;
-    u32 font_index;
+    vec3 bg_color;
+    i32 nine_slice_id;
+    bool blocks_cursor;
+    bool is_hidden;
+    bool is_slice_center_hidden;
+} UI_Container_Config;
+
+typedef struct {
+    float width;
+    float height;
+    float font_height;
+    int num_lines;
+} UI_Text_Dimension;
+
+typedef struct {
+    //TODO: text wrapping rules (e.g. FIT and NO_WRAP)
+    u32 id;
+    UI_Element_Layout layout;
+    u32 font;
     String text;
     float scale;
     UI_Alignment align;
@@ -345,21 +353,85 @@ typedef struct {
     vec3 outline_color;
     float outline;
     bool bg_slice;
-    //TODO: text wrapping rules (e.g. FIT and NO_WRAP)
+    i32 bg_slice_id;
+    //Calculated during the size_pos pass
+    UI_Text_Dimension _dimension;
+    //This gets calculated during the size_pos pass
+    float _screen_scale;
+    //TODO: if there is more type-specific data later on consider adding more structs and another union for that!
 } UI_Text_Config;
 
+typedef struct {
+    i32 row;
+    i32 column;
+} Texture_Atlas_Cell;
+
 typedef enum {
-    UI_IMAGE_SIZE_MODE_KEEP_ASPECT,
-    UI_IMAGE_SIZE_MODE_STRETCH,
-} UI_Image_Size_Mode;
+    UI_IMAGE_TEX_MODE_FULL,
+    UI_IMAGE_TEX_MODE_ATLAS_CELL_INDEX,
+    UI_IMAGE_TEX_MODE_ATLAS_ROW_COLUMN,
+    UI_IMAGE_TEX_MODE_BY_VALUE,
+} UI_Image_Tex_Mode;
+
+typedef struct {
+    UI_Image_Tex_Mode mode;
+
+    union {
+        i32 cell_index;
+        Texture_Atlas_Cell cell;
+        Tex_Coords value;
+    } data;
+} UI_Image_Tex_Coords;
+
+static UI_Image_Tex_Coords ui_image_tex_coords_atlas_row_colum(
+    const i32 row, const i32 column
+) {
+    return (UI_Image_Tex_Coords){
+        .mode = UI_IMAGE_TEX_MODE_ATLAS_ROW_COLUMN,
+        .data = {
+            .cell = {
+                .row = row,
+                .column = column
+            }
+        }
+    };
+}
+
+static UI_Image_Tex_Coords ui_image_tex_coords_atlas_cell_index(
+    const i32 cell_index
+) {
+    return (UI_Image_Tex_Coords){
+        .mode = UI_IMAGE_TEX_MODE_ATLAS_CELL_INDEX,
+        .data = {
+            .cell_index = cell_index
+        }
+    };
+}
+
+static UI_Image_Tex_Coords ui_image_tex_coords_by_value(
+    const Tex_Coords tex_coords
+) {
+    return (UI_Image_Tex_Coords){
+        .mode = UI_IMAGE_TEX_MODE_BY_VALUE,
+        .data = {
+            .value = tex_coords
+        }
+    };
+}
+
+typedef struct {
+    i32 id;
+    //index inside the texture resources array! not to be confused with opengl ids!
+    UI_Image_Tex_Coords coords;
+} UI_Image_Texture;
 
 typedef struct {
     u32 id;
-    i32 texture_id;
+    UI_Image_Texture texture;
     UI_Element_Layout layout;
-    UI_Image_Size_Mode size_mode;
     vec3 color;
     vec2 pivot;
+    bool blocks_cursor;
 } UI_Image_Config;
 
 typedef struct {
@@ -367,15 +439,22 @@ typedef struct {
     size_t depth;
     UI_Element_Type type;
     UI_Element_Layout layout;
+
     union {
         UI_Container_Config container;
         UI_Text_Config text;
         UI_Image_Config image;
     } config;
+
     size_t first_child_index;
     size_t child_count;
-    vec2 calc_size;
-    vec2 calc_pos;
+
+    //Calculated during the size_pos pass
+    vec2 _adjust_pos; // in square coords
+    vec2 _adjusted_size; // in square coords
+    //Converted during the size_pos Pass
+    vec2 _screen_pos; //adjusted_pos converted to screen coords
+    vec2 _screen_size; //adjusted_size converted to screen coords
 } UI_Element;
 
 // This is for converting the 'virtual 1000x1000 pixel' values to the actual
@@ -384,11 +463,25 @@ typedef struct {
     float scale_fac; //decimal factor - to avoid division by 1000.f everywhere
     float size; //actual viewport pixel size of a square edge
     vec2 center;
-    vec2 origin;//Bottom Left Pos
+    vec2 origin; //Bottom Left Pos
 } UI_Render_Square;
 
+typedef struct {
+    bool is_hovering;
+    size_t hover_element_index; //only valid when is_hovering is true
+    u32 hover_id;
+    //will be passed this to the next frame so that it can then be visualized by the layout (game.c)
+    u32 down_id;
+    bool is_start_touch;
+} UI_Context_Input;
+
+typedef struct {
+    i32 unused;
+} UI_Context_Debug;
+
 struct UI_Context {
-    vec2 screen_size;
+    vec2 viewport_size;
+    vec2 cursor_pos;
     UI_Element elements[UI_MAX_ELEMENTS];
     size_t tree_depth;
     size_t elem_count;
@@ -398,6 +491,8 @@ struct UI_Context {
     size_t temp_queue_count;
     Arena string_arena;
     UI_Render_Square square;
+    UI_Context_Input input;
+    UI_Context_Debug debug;
 };
 
 static void ui_element_start() {
@@ -454,13 +549,11 @@ static void ui_text_element(
 }
 
 static void ui_image_element(
-    const u32 texture_id,
     const UI_Image_Config config
 ) {
     ui_element_start();
     ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_IMAGE;
     ui_ctx->temp_elem.config.image = config;
-    ui_ctx->temp_elem.config.image.texture_id = texture_id;
     ui_element_set_layout(config.layout);
     ui_element_end();
 }

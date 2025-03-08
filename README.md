@@ -34,6 +34,7 @@ other.
 - Add FNL
 - Tilemap rendering
 - Game simulation
+- Switch UI Coordinates from bottom-left = 0,0 to top-left = 0,0 
 
 ## Emscripten
 Run ```build-emscripten``` from the project root to build for web. 

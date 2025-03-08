@@ -58,10 +58,8 @@ const float DELTA_TIME = ((float)TICK_RATE_IN_MS / (float)SDL_MS_PER_SECOND);
 
 UI_Context* ui_ctx;
 
-//FONT_SIZE-Values for 128px FONT_TEXTURE_SIZE
-//16 - Born2bSportyV2.ttf
-//18 - Tiny.ttf
-#define FONT_TEXTURE_SIZE 128
+#define CRLF_TEXTURE_SIZE 128
+#define FONT_TEXTURE_SIZE CRLF_TEXTURE_SIZE
 #define FONT_TAB_SIZE 6
 #define FONT_SPACE_SIZE 3
 //see https://en.wikipedia.org/wiki/List_of_Unicode_characters#Control_codes
@@ -151,9 +149,6 @@ const char PATH_SLASH =
 #endif
 
 char TEMP_PATH[MAX_PATH_LEN];
-
-const char* FONT_PATH = "font-tiny/tiny.ttf";
-
 //For desktop this is 32 - but we'll go with the lowest common denominator: web
 #define MAX_TEXTURE_SLOTS 16
 
@@ -227,12 +222,17 @@ char* temp_path_append(const char* base, const char* file) {
 typedef enum {
     TEXTURE_RAW_SOURCE_STB_IMAGE, //loaded via STB_Image
     TEXTURE_RAW_SOURCE_DYNAMIC, //loaded from Memory
-} Texture_Raw_Source;
+} Raw_Texture_Source;
+
+typedef struct {
+    i32 rows;
+    i32 columns;
+} Texture_Atlas;
 
 typedef struct {
     i32 width, height, channels;
     u8* data;
-    Texture_Raw_Source source;
+    Raw_Texture_Source source;
 } Raw_Texture;
 
 typedef struct {
@@ -297,7 +297,7 @@ Raw_Texture* raw_texture_from_file(
     SDL_PathInfo path_info;
     if (!SDL_GetPathInfo(file_path, &path_info) || path_info.type !=
         SDL_PATHTYPE_FILE) {
-        SDL_LogError(0, "Invalid Path: %s", SDL_GetError());
+        SDL_LogError(0, "Invalid Path(%s): %s", file_path, SDL_GetError());
         return NULL;
     }
 
@@ -363,7 +363,15 @@ GL_Texture_Format gl_texture_get_format(
         };
     case 4:
         return (GL_Texture_Format){
+            //BUG: GL_SRGB_ALPHA in combination with texImage3D causes a crash in web:
+            //INVALID_VALUE: texImage3D: invalid internalformat
+            //GL_INVALID_OPERATION: Level of detail outside of range.
+            //GL_INVALID_OPERATION: Texture format does not support mipmap generation.
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+            .internal_format = gamma_correct ? GL_SRGB8_ALPHA8 : GL_RGBA,
+#else
             .internal_format = gamma_correct ? GL_SRGB_ALPHA : GL_RGBA,
+#endif
             .format = GL_RGBA,
         };
     default:
@@ -401,7 +409,7 @@ GL_Texture gl_texture_from_raw_texture(
     glGenTextures(1, &texture.id);
     SDL_assert(texture.id > 0);
     gl_texture_bind(&texture, 0);
-    GL_Texture_Format format = gl_texture_get_format(
+    const GL_Texture_Format format = gl_texture_get_format(
         raw_texture->channels,
         config.gamma_correction
     );
@@ -588,7 +596,7 @@ Raw_Texture* font_load_raw_texture(
     return raw_texture;
 }
 
-bool font_load_single(const char* file_path, Font* font, const i32 size) {
+bool font_load_single(const char* file_path, Font* font, const float size) {
     Raw_Texture* raw_texture = font_load_raw_texture(file_path, font, size);
     if (raw_texture == NULL)
         return false;
@@ -603,7 +611,7 @@ bool font_load_single(const char* file_path, Font* font, const i32 size) {
 }
 
 Raw_Texture* font_load_for_array(
-    const char* file_path, Font* font, const i32 size, const i32 texture_id
+    const char* file_path, Font* font, const float size, const i32 texture_id
 ) {
     Raw_Texture* raw_texture = font_load_raw_texture(file_path, font, size);
     font->texture_type = FONT_TEXTURE_TYPE_ARRAY;
@@ -798,6 +806,7 @@ void viewport_generate(
         viewport->frame_buffer_size.y,
         0,
         viewport->has_blending ? GL_RGBA : GL_RGB,
+        //BUG: Floating point precision using GL_FLOAT is not supported in web, check GL ES 3.0 specs for an equivalent!
         viewport->floating_point_precision ? GL_FLOAT : GL_UNSIGNED_BYTE,
         NULL
     );
@@ -912,24 +921,76 @@ void viewport_render_to_window(
         glDisable(GL_BLEND);
 }
 
-/* RECT TEX COORDS ************************************************************/
-//To avoid C's array weirdness we'll use a struct for tex_coords instead of an
-//array(as we would in e.g. Odin)
-typedef struct {
-    vec2 bottom_left, bottom_right, top_left, top_right;
-} Tex_Coords;
-
+/* TEXTURE COORD QUADS ********************************************************/
 typedef struct {
     vec2 min, max;
-} Tex_Coords_Quad;
+} Tex_Quad;
 
-Tex_Coords default_rect_tex_coords() {
-    return (Tex_Coords){
-        .bottom_left = {0.0f, 0.0f},
-        .bottom_right = {1.0f, 0.0f},
-        .top_left = {0.0f, 1.0f},
-        .top_right = {1.0f, 1.0f},
+// Assuming row-major ordering (cells are filled left to right, then top to bottom)
+// row, colum value range 0-1
+Tex_Quad tex_quad_from_cell(
+    const i32 row, const i32 column, const i32 rows, const i32 columns
+) {
+    SDL_assert(row < rows);
+    SDL_assert(column < columns);
+
+    const float cell_width = 1.0f / (float)columns;
+    const float cell_height = 1.0f / (float)rows;
+
+    const vec2 min = (vec2){
+        (float)column * cell_width,
+        (float)row * cell_height
     };
+    const vec2 max = (vec2){
+        min.x + cell_width,
+        min.y + cell_height
+    };
+
+    return (Tex_Quad){
+        .min = min,
+        .max = max,
+    };
+}
+
+// Assuming row-major ordering (cells are filled left to right, then top to bottom)
+// row, colum value range 0-1
+Tex_Coords tex_coords_from_cell(
+    const i32 row, const i32 column, const i32 rows, const i32 columns
+) {
+    const Tex_Quad quad = tex_quad_from_cell(
+        row, column, rows, columns
+    );
+
+    return (Tex_Coords){
+        .bottom_left = {quad.min.x, quad.min.y},
+        .bottom_right = {quad.max.x, quad.min.y},
+        .top_left = {quad.min.x, quad.max.y},
+        .top_right = {quad.max.x, quad.max.y},
+    };
+}
+
+// row, colum value range 0-1
+void quad_row_and_column_from_cell_index(
+    const i32 cell_index, const i32 columns, i32* row, i32* column
+) {
+    *row = cell_index / columns;
+    *column = cell_index % columns;
+}
+
+Tex_Quad tex_quad_from_cell_index(
+    const i32 cell_index, const i32 rows, const i32 columns
+) {
+    i32 row, column;
+    quad_row_and_column_from_cell_index(cell_index, columns, &row, &column);
+    return tex_quad_from_cell(row, column, rows, columns);
+}
+
+Tex_Coords tex_coords_from_cell_index(
+    const i32 cell_index, const i32 rows, const i32 columns
+) {
+    i32 row, column;
+    quad_row_and_column_from_cell_index(cell_index, columns, &row, &column);
+    return tex_coords_from_cell(row, column, rows, columns);
 }
 
 Tex_Coords tex_coords_mul_float(
@@ -982,7 +1043,7 @@ Tex_Coords tex_coords_sub_vec2(
 
 Tex_Coords tex_coords_map_to_quad(
     const Tex_Coords tex_coords,
-    const Tex_Coords_Quad* quad
+    const Tex_Quad* quad
 ) {
     const vec2 scale = vec2_sub_vec2(quad->max, quad->min);
     return tex_coords_add_vec2(
@@ -1021,7 +1082,7 @@ void add_rect_to_buffer(Rect_Buffer* rect_buffer, const Rect rect) {
 void add_rect_to_buffer_quadmap(
     Rect_Buffer* rect_buffer,
     Rect rect,
-    const Tex_Coords_Quad* quad
+    const Tex_Quad* quad
 ) {
     SDL_assert(quad != NULL);
     rect.tex_coords = tex_coords_map_to_quad(rect.tex_coords, quad);
@@ -1068,8 +1129,7 @@ void build_rect_vertex_buffer(
                 rect.pos, (vec2){sub_x * rect.size.x, sub_y * rect.size.y}     \
             ), pivot_offset);                                                  \
         vertex.tex_coord = rect.tex_coords.corner;                             \
-        const Rect_Vertex corner = vertex;                                     \
-
+        const Rect_Vertex corner = vertex;
         MAKE_CORNER_VERTEX(bottom_left, 0, 0)
         MAKE_CORNER_VERTEX(bottom_right, 1, 0)
         MAKE_CORNER_VERTEX(top_left, 0, 1)
@@ -1104,13 +1164,6 @@ void draw_rects(
 }
 
 /* TEXT RENDERING *************************************************************/
-typedef struct {
-    float width;
-    float height;
-    float font_height;
-    int num_lines;
-} UI_Text_Dimension;
-
 float get_font_height(const Font* font, const float scale) {
     return font->size * scale;
 }
@@ -1122,16 +1175,16 @@ UI_Text_Dimension get_text_dimension(
 ) {
     float width = 0;
     float curr_width = 0;
-    int num_lines = 1;
+    i32 num_lines = 1;
 
     while (*text) {
-        const int codepoint = (unsigned char)*text;
+        const i32 codepoint = (unsigned char)*text;
         if (codepoint == '\n') {
             width = SDL_max(curr_width, width);
             curr_width = 0;
             num_lines++;
         } else {
-            const int char_index = codepoint - FONT_UNICODE_START;
+            const i32 char_index = codepoint - FONT_UNICODE_START;
             if (char_index >= 0) {
                 curr_width += font->char_data[char_index].xadvance;
             }
@@ -1155,23 +1208,23 @@ float get_text_width(const char* text, const Font* font, const float scale) {
     float width = 0;
     float curr_width = 0;
     while (*text) {
-        const int codepoint = (unsigned char)*text;
+        const i32 codepoint = (unsigned char)*text;
         if (codepoint == '\n') {
             width = SDL_max(curr_width, width);
             curr_width = 0;
         } else {
-            const int char_index = codepoint - FONT_UNICODE_START;
+            const i32 char_index = codepoint - FONT_UNICODE_START;
             if (char_index >= 0) {
                 curr_width += font->char_data[char_index].xadvance;
             }
         }
-
         text++;
     }
     width = SDL_max(curr_width, width);
 
     return width * scale;
 }
+
 void render_text(
     const String text,
     const Font* font,
@@ -1286,9 +1339,11 @@ void render_text_outlined(
 
 /* NINE SLICE *****************************************************************/
 typedef struct {
+    i32 texture_id;
     float total_size;
     float border_size;
-    Tex_Coords_Quad quad;
+    Tex_Quad quad;
+    i32* id_ptr;
 } Nine_Slice;
 
 void render_nine_slice(
@@ -1297,7 +1352,6 @@ void render_nine_slice(
     const vec2 size,
     const vec3 color,
     const float sort_order,
-    const i32 texture_id,
     const Nine_Slice* nine_slice,
     bool render_center
 ) {
@@ -1313,7 +1367,7 @@ void render_nine_slice(
         .color = color,
         .size = border_size,
         .sort_order = sort_order,
-        .texture_id = texture_id,
+        .texture_id = nine_slice->texture_id,
     };
     //TODO: assert for size < border_size
 
@@ -1321,7 +1375,7 @@ void render_nine_slice(
     rect.pivot = (vec2){0.f, 0.f};
     rect.pos = vec2_sub_vec2(pos, half_size);
     rect.tex_coords = tex_coords_mul_float(
-        default_rect_tex_coords(),
+        default_tex_coords(),
         bs_normalized
     );
     add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
@@ -1418,12 +1472,95 @@ void render_nine_slice(
     }
 }
 
-/* UI LAYOUT ******************************************************************/
+/* TEXTURE RESOURCE ***********************************************************/
+/*For simplicity, we pack ALL things texture into a single gl texture array.
+To handle the different types of textures like atlantes, fonts and normal images
+we use the opaque concept of Texture_Resources.
+*/
+
+typedef enum {
+    TEXTURE_TYPE_DEFAULT,
+    TEXTURE_TYPE_FONT,
+    TEXTURE_TYPE_ATLAS,
+} Texture_Type;
+
 typedef struct {
-    vec2 pos;
-    vec2 size;
-    vec2 pivot;
-} Box_Layout;
+    const char* file_name;
+    Texture_Type type;
+
+    union {
+        //This is a bit un intuitive to have the font in here but works for now..
+        Font font;
+        Texture_Atlas atlas;
+    } data;
+
+    i32* res_id;
+} Texture_Resource;
+
+Texture_Resource texture_resource_default(
+    const char* file_name, i32* res_id
+) {
+    return (Texture_Resource){
+        .file_name = file_name,
+        .res_id = res_id,
+        .type = TEXTURE_TYPE_DEFAULT,
+    };
+}
+
+Texture_Resource texture_resource_font(
+    const char* file_name, const float font_size, i32* res_id
+) {
+    return (Texture_Resource){
+        .file_name = file_name,
+        .res_id = res_id,
+        .type = TEXTURE_TYPE_FONT,
+        .data = {
+            .font = {
+                .size = font_size,
+            }
+        }
+    };
+}
+
+Texture_Resource texture_resource_atlas(
+    const char* file_name, const i32 rows, const i32 columns, i32* res_id
+) {
+    return (Texture_Resource){
+        .file_name = file_name,
+        .res_id = res_id,
+        .type = TEXTURE_TYPE_ATLAS,
+        .data = {
+            .atlas = (Texture_Atlas){
+                .rows = rows, .columns = columns,
+            }
+        }
+    };
+}
+
+/* RESOURCES ******************************************************************/
+typedef struct {
+    Texture_Resource* textures;
+    i32 num_textures;
+    Nine_Slice* nine_slices;
+    i32 num_nine_slices;
+} Resources;
+
+void resources_cleanup(const Resources* resources) {
+    for (int i = 0; i < resources->num_textures; i++) {
+        switch (resources->textures[i].type) {
+        case TEXTURE_TYPE_DEFAULT:
+            break;
+        case TEXTURE_TYPE_FONT:
+            font_delete(&resources->textures[i].data.font);
+            break;
+        case TEXTURE_TYPE_ATLAS:
+            break;
+        }
+    }
+    CRLF_free(resources->textures);
+
+    CRLF_free(resources->nine_slices);
+}
 
 /* MOUSE **********************************************************************/
 typedef struct {
@@ -1527,16 +1664,34 @@ UI_DEBUG_TEXT_RECT
 Renders the full UI_Text rect in a single color
 */
 
+u32 ui_element_get_id(const UI_Element* element) {
+    if (element == NULL) return 0;
+    switch (element->type) {
+    default: SDL_assert(0);
+        return 0;
+    case UI_ELEMENT_TYPE_CONTAINER:
+        return element->config.container.id;
+    case UI_ELEMENT_TYPE_TEXT:
+        return element->config.text.id;
+    case UI_ELEMENT_TYPE_IMAGE:
+        return element->config.image.id;
+    }
+}
+
+u32 ui_element_get_id_by_index(const size_t index) {
+    return ui_element_get_id(&ui_ctx->elements[index]);
+}
+
 void init_ui_context_ptr(UI_Context* ui_context) {
     SDL_assert(ui_context != NULL);
     *ui_context = (UI_Context){
-        .screen_size = (vec2){APP_WINDOW_WIDTH, APP_WINDOW_HEIGHT},
+        .viewport_size = (vec2){APP_WINDOW_WIDTH, APP_WINDOW_HEIGHT},
         .elements = {0},
         .temp_queue = {0},
     };
 }
 
-void ui_context_init(const vec2 screen_size) {
+void ui_context_init() {
     ui_ctx = CRLF_malloc(sizeof(UI_Context));
     init_ui_context_ptr(ui_ctx);
     ui_ctx->string_arena = arena_init(UI_STRING_ARENA_SIZE);
@@ -1553,6 +1708,7 @@ void ui_context_clear() {
     ui_ctx->temp_depth = 0;
     ui_ctx->temp_elem = (UI_Element){0};
     ui_ctx->temp_queue_count = 0;
+    ui_ctx->debug = (UI_Context_Debug){0};
     arena_clear(&ui_ctx->string_arena);
 }
 
@@ -1587,6 +1743,7 @@ void ui_tree_reindex_depth_first_to_breadth_first() {
         if (element.child_count > 0) {
             element.first_child_index = new_indices[element.first_child_index];
         }
+        element.index = new_indices[i];
         reindexed_elements[new_indices[i]] = element;
     }
 
@@ -1595,7 +1752,7 @@ void ui_tree_reindex_depth_first_to_breadth_first() {
     }
 }
 
-void ui_tree_print(const size_t index, const int depth) {
+void ui_context_print(const size_t index, const i32 depth) {
     if (index >= ui_ctx->elem_count) return;
     for (int i = 0; i < depth; i++) printf("  ");
     const UI_Element* elem = &ui_ctx->elements[index];
@@ -1604,106 +1761,32 @@ void ui_tree_print(const size_t index, const int depth) {
     case UI_ELEMENT_TYPE_CONTAINER:
         printf("LAYOUT:\n");
         for (size_t i = 0; i < elem->child_count; i++) {
-            ui_tree_print(elem->first_child_index + i, depth + 1);
+            ui_context_print(elem->first_child_index + i, depth + 1);
         }
         break;
     case UI_ELEMENT_TYPE_TEXT:
         printf("TEXT: %s\n", elem->config.text.text.chars);
         break;
     case UI_ELEMENT_TYPE_IMAGE:
-        printf("IMAGE: %d\n", elem->config.image.texture_id);
+        printf("IMAGE: %d\n", elem->config.image.texture.id);
         break;
     default: SDL_assert(0);
     }
 }
 
-float ui_element_calc_axis_size(
-    const UI_Element_Size* size,
-    const float parent_size
-) {
-    switch (size->mode) {
-    case UI_ELEMENT_SIZE_MODE_PERCENT:
-        return parent_size * size->value;
-    case UI_ELEMENT_SIZE_MODE_FIXED:
-        return size->value;
-        break;
-    case UI_ELEMENT_SIZE_MODE_CONTENT:
-        // SDL_assert(0);
-        break;
-    }
-    return 0;
+typedef struct {
+    vec2 min;
+    vec2 max;
+} UI_Box;
+
+bool point_inside_box(const UI_Box box, const vec2 point) {
+    return point.x >= box.min.x && point.y >= box.min.y &&
+        point.x <= box.max.x && point.y <= box.max.y;
 }
 
-vec2 ui_element_calc_size(
-    const UI_Element_Sizes* size,
-    const vec2* parent_size
-) {
-    return (vec2){
-        ui_element_calc_axis_size(&size->width, parent_size->x),
-        ui_element_calc_axis_size(&size->height, parent_size->y)
-    };
-}
-
-float ui_element_calc_axis_pos(
-    const float element_size,
-    const float parent_size,
-    const float parent_pos,
-    const float alignment
-) {
-    return (parent_size - element_size) * .5f + parent_pos;
-}
-
-float ui_element_alignment_x_to_float(const UI_Alignment_X alignment) {
-    switch (alignment) {
-    case UI_ALIGNMENT_X_CENTER:
-        return 0.f;
-    case UI_ALIGNMENT_X_LEFT:
-        return -1.f;
-    case UI_ALIGNMENT_X_RIGHT:
-        return 1.f;
-    default:
-        SDL_assert(0);
-        return 0;
-    }
-}
-
-float ui_element_alignment_y_to_float(const UI_Alignment_Y alignment) {
-    switch (alignment) {
-    case UI_ALIGNMENT_Y_CENTER:
-        return 0.f;
-    case UI_ALIGNMENT_Y_BOTTOM:
-        return -1.f;
-    case UI_ALIGNMENT_Y_TOP:
-        return 1.f;
-    default:
-        SDL_assert(0);
-        return 0;
-    }
-}
-
-//this currently only centers to the parent - not taking parent's other children into account
-vec2 ui_element_calc_pos(
-    const vec2* element_size,
-    const vec2* parent_size,
-    const vec2* parent_pos,
-    const UI_Alignment alignment
-) {
-    return (vec2){
-        .x = ui_element_calc_axis_pos(
-            element_size->x, parent_size->x, parent_pos->x,
-            ui_element_alignment_x_to_float(alignment.x)
-        ),
-        .y = ui_element_calc_axis_pos(
-            element_size->y, parent_size->y, parent_pos->y,
-            ui_element_alignment_y_to_float(alignment.y)
-        ),
-    };
-}
-
-//TODO: remove the font/nineslice/resources dependency
-void ui_context_draw(
-    Rect_Buffer* rect_buffer,
-    Font* font,
+//Adjusts the ui elements position and converts from square to screen coordinates
+void ui_context_pos_size_pass(
+    Resources* resources,
     const size_t index,
     const UI_Element* parent
 ) {
@@ -1711,78 +1794,57 @@ void ui_context_draw(
     UI_Element* element = &ui_ctx->elements[index];
 
     const bool is_root = parent == NULL;
-    const vec2 parent_pos = is_root ? UI_POS(500, 500) : parent->calc_pos;
-    const vec2 parent_size = is_root ? UI_SIZE(1000, 1000) : parent->calc_size;
+    const vec2 parent_pos = is_root ? UI_POS(500, 500) : parent->_adjust_pos;
+    const vec2 parent_size = is_root
+                                 ? UI_SIZE(1000, 1000)
+                                 : parent->_adjusted_size;
 
-    element->calc_pos = UI_POS(
+    element->_adjust_pos = UI_POS(
         parent_pos.x + float_lerp(-.5f, .5f, element->layout.anchor.x) *
         parent_size.x + element->layout.offset.x,
 
         parent_pos.y + float_lerp(-.5f, .5f, element->layout.anchor.y) *
         parent_size.y + element->layout.offset.y
     );
-    element->calc_size = element->layout.size;
+    element->_adjusted_size = element->layout.size;
 
-    const Nine_Slice nine_slice_rounded = {
-        .total_size = 32.f,
-        .border_size = 10.f,
-        .quad = {
-            .min = (vec2){0.f, .75f},
-            .max = (vec2){.25f, 1.f},
-        }
-    };
-    const Nine_Slice nine_slice_square = {
-        .total_size = 32.f,
-        .border_size = 10.f,
-        .quad = {
-            .min = (vec2){.25f, .75f},
-            .max = (vec2){.5f, 1.f},
-        }
-    };
-
-    const float sort_order = (float)element->depth;
-    vec2 pos_converted = UI_POS(
-        ui_ctx->square.origin.x + element->calc_pos.x * ui_ctx->square.scale_fac,
-        ui_ctx->square.origin.y + element->calc_pos.y * ui_ctx->square.scale_fac
+    element->_screen_pos = UI_POS(
+        ui_ctx->square.origin.x + element->_adjust_pos.x * ui_ctx->square.
+        scale_fac,
+        ui_ctx->square.origin.y + element->_adjust_pos.y * ui_ctx->square.
+        scale_fac
     );
-
-    vec2 size_converted = UI_SIZE(
-        element->calc_size.x * ui_ctx->square.scale_fac,
-        element->calc_size.y * ui_ctx->square.scale_fac
+    element->_screen_size = UI_SIZE(
+        element->_adjusted_size.x * ui_ctx->square.scale_fac,
+        element->_adjusted_size.y * ui_ctx->square.scale_fac
     );
 
     switch (element->type) {
+    default: SDL_assert(0);
+        break;
     /* CONTAINER **************************************************************/
     case UI_ELEMENT_TYPE_CONTAINER:
-        render_nine_slice(
-            rect_buffer,
-            pos_converted,
-            size_converted,
-            // vec2_div_float(element->calc_size, ui_ctx->render_square.size),
-            element->config.container.bg_color,
-            (float)element->depth,
-            2,
-            &nine_slice_square,
-            true
-        );
         for (size_t i = 0; i < element->child_count; i++) {
-            ui_context_draw(
-                rect_buffer, font, element->first_child_index + i, element
+            ui_context_pos_size_pass(
+                resources, element->first_child_index + i, element
             );
         }
         break;
 
     /* TEXT *******************************************************************/
-    //NOTE: The order of execution here is crucial - don't change
-    //Learning: Always use 0.25 for height when you intuitively would use 0.5
-    case UI_ELEMENT_TYPE_TEXT:
-        const float text_scale = font->size * element->config.text.scale *
-            ui_ctx->square.scale_fac;
+    //NOTE: The order of execution here is crucial - don't change!
+    case UI_ELEMENT_TYPE_TEXT: {
+        const Font* font = &resources->textures[element->config.text.font].data.
+            font;
+        element->config.text._screen_scale = font->size * element->config.text.
+            scale * ui_ctx->square.scale_fac;
+        const float text_scale = element->config.text._screen_scale;
 
-        const UI_Text_Dimension txt = get_text_dimension(
+        UI_Text_Dimension* txt = &element->config.text._dimension;
+        *txt = get_text_dimension(
             element->config.text.text.chars, font, text_scale
         );
-        size_converted = UI_SIZE(txt.width,txt.height);
+        element->_screen_size = UI_SIZE(txt->width, txt->height);
 
 #if defined(UI_DEBUG_TEXT_ORIGIN)
         render_nine_slice(
@@ -1792,13 +1854,12 @@ void ui_context_draw(
 #endif
 
         //TODO: add support for wrapping (inserting line breaks to fit the rect)
-
         switch (element->config.text.align.x) {
         case UI_ALIGNMENT_X_CENTER:
-            pos_converted.x -= txt.width * 0.5f;
+            element->_screen_pos.x -= txt->width * 0.5f;
             break;
         case UI_ALIGNMENT_X_LEFT:
-            pos_converted.x -= txt.width;
+            element->_screen_pos.x -= txt->width;
             break;
         case UI_ALIGNMENT_X_RIGHT:
             break;
@@ -1806,24 +1867,161 @@ void ui_context_draw(
 
         switch (element->config.text.align.y) {
         case UI_ALIGNMENT_Y_CENTER:
-            pos_converted.y += txt.height * 0.5f - txt.font_height * 0.75f;
-            // pos_converted.y += txt.height; //* 0.25f;//center
+            element->_screen_pos.y += txt->height * 0.5f - txt->font_height *
+                0.75f;
             break;
         case UI_ALIGNMENT_Y_BOTTOM:
-            pos_converted.y +=  txt.height - txt.font_height * 1.25f; // Align to bottom of bounding box
-            // pos_converted.y += txt.height * 0.75f;
+            element->_screen_pos.y += txt->height - txt->font_height * 1.25f;
             break;
         case UI_ALIGNMENT_Y_TOP:
-            pos_converted.y -= txt.font_height * 0.25f;
+            element->_screen_pos.y -= txt->font_height * 0.25f;
             break;
         }
+        break;
+    }
+    /* IMAGE ******************************************************************/
+    case UI_ELEMENT_TYPE_IMAGE:
+        break;
+    }
+}
+
+void ui_context_input_pass_element_hover_check(
+    const UI_Box box,
+    const UI_Element* element
+) {
+    const bool is_hovering = point_inside_box(box, ui_ctx->cursor_pos);
+
+    if (is_hovering) {
+        if (!ui_ctx->input.is_hovering) {
+            ui_ctx->input.is_hovering = true;
+            ui_ctx->input.hover_element_index = element->index;
+            //TODO: touch edge case
+        } else if (ui_ctx->elements[ui_ctx->input.hover_element_index].depth <
+            element->depth) {
+            ui_ctx->input.hover_element_index = element->index;
+        }
+    }
+}
+
+void ui_context_input_pass_recursion(
+    const size_t index
+) {
+    if (index >= ui_ctx->elem_count) return;
+    const UI_Element* element = &ui_ctx->elements[index];
+
+    switch (element->type) {
+    default: SDL_assert(0);
+        break;
+    /* CONTAINER **************************************************************/
+    case UI_ELEMENT_TYPE_CONTAINER:
+        if (element->config.container.blocks_cursor) {
+            const UI_Box box = (UI_Box){
+                .min = UI_POS(
+                    element->_screen_pos.x - element->_screen_size.x * 0.5f,
+                    element->_screen_pos.y - element->_screen_size.y * 0.5f
+                ),
+                .max = UI_POS(
+                    element->_screen_pos.x + element->_screen_size.x * 0.5f,
+                    element->_screen_pos.y + element->_screen_size.y * 0.5f
+                )
+            };
+            ui_context_input_pass_element_hover_check(box, element);
+        }
+
+        for (size_t i = 0; i < element->child_count; i++) {
+            ui_context_input_pass_recursion(element->first_child_index + i);
+        }
+        break;
+
+    /* TEXT *******************************************************************/
+    case UI_ELEMENT_TYPE_TEXT:
+        //no interactions with text atm
+        break;
+    /* IMAGE ******************************************************************/
+    case UI_ELEMENT_TYPE_IMAGE:
+        if (element->config.image.blocks_cursor) {
+            vec2 min = UI_POS(
+                element->_screen_pos.x - element->_screen_size.x * element->
+                config.image.pivot.x,
+                element->_screen_pos.y - element->_screen_size.y * element->
+                config.image.pivot.y
+            );
+            const UI_Box box = (UI_Box){
+                .min = min,
+                .max = UI_POS(
+                    min.x + element->_screen_size.x,
+                    min.y + element->_screen_size.y
+                )
+            };
+            ui_context_input_pass_element_hover_check(box, element);
+        }
+        break;
+    }
+}
+
+//Identifies interactions (hovered element, scroll etc)
+void ui_context_input_pass() {
+    const bool was_start_touch = ui_ctx->input.is_start_touch;
+    const u32 temp_down_id = ui_ctx->input.down_id;
+    ui_ctx->input = (UI_Context_Input){0};
+    ui_ctx->input.down_id = temp_down_id;
+
+    ui_context_input_pass_recursion(0);
+
+    ui_ctx->input.hover_id = 0;
+    if (ui_ctx->input.is_hovering) {
+        ui_ctx->input.hover_id = ui_element_get_id_by_index(
+            ui_ctx->input.hover_element_index
+        );
+        if (was_start_touch) {
+            ui_ctx->input.down_id = ui_ctx->input.hover_id;
+            SDL_Log("TOUCH ID: %u", ui_ctx->input.down_id);
+        }
+    }
+}
+
+//Adds the UI layout to the rect buffer
+void ui_context_rect_render_pass(
+    Rect_Buffer* rect_buffer,
+    Resources* resources,
+    const size_t index
+) {
+    if (index >= ui_ctx->elem_count) return;
+    UI_Element* element = &ui_ctx->elements[index];
+    const float sort_order = (float)element->depth;
+    switch (element->type) {
+    default: SDL_assert(0);
+        break;
+    /* CONTAINER **************************************************************/
+    case UI_ELEMENT_TYPE_CONTAINER:
+        if (!element->config.container.is_hidden) {
+            render_nine_slice(
+                rect_buffer,
+                element->_screen_pos,
+                element->_screen_size,
+                element->config.container.bg_color,
+                (float)element->depth,
+                &resources->nine_slices[element->config.container.
+                                                 nine_slice_id],
+                !element->config.container.is_slice_center_hidden
+            );
+        }
+        for (size_t i = 0; i < element->child_count; i++) {
+            ui_context_rect_render_pass(
+                rect_buffer, resources, element->first_child_index + i
+            );
+        }
+        break;
+
+    /* TEXT *******************************************************************/
+    case UI_ELEMENT_TYPE_TEXT: {
+        const UI_Text_Dimension* txt = &element->config.text._dimension;
 #if defined(UI_DEBUG_TEXT_BOTTOM_LEFT)
         render_nine_slice(
             rect_buffer, pos_converted,VEC2_ZERO, element->config.text.color,
             (float)element->depth, 2, &nine_slice_rounded,true
         );
 #endif
-
 
 #if defined(UI_DEBUG_TEXT_RECT)
         add_rect_to_buffer(
@@ -1841,67 +2039,86 @@ void ui_context_draw(
         if (element->config.text.bg_slice) {
             render_nine_slice(
                 rect_buffer,
-                vec2_add_vec2(pos_converted, UI_SIZE(
-                    txt.width *.5f,
-                    - (txt.height * 0.5f - txt.font_height * 0.75f))),
-                size_converted,
+                vec2_add_vec2(
+                    element->_screen_pos, UI_SIZE(
+                        txt->width *.5f,
+                        - (txt->height * 0.5f - txt->font_height * 0.75f)
+                    )
+                ),
+                element->_screen_size,
                 element->config.text.color,
                 (float)element->depth,
-                2,
-                &nine_slice_rounded,
+                &resources->nine_slices[element->config.text.bg_slice_id],
                 true
             );
         }
 
         if (element->config.text.outline > 0.f) {
             render_text_outlined(
-                element->config.text.text, font,
-                pos_converted,
+                element->config.text.text,
+                &resources->textures[element->config.text.font].data.font,
+                element->_screen_pos,
                 element->config.text.color,
-                text_scale,
+                element->config.text._screen_scale,
                 sort_order + .1f, rect_buffer,
                 element->config.text.outline * ui_ctx->square.scale_fac,
                 element->config.text.outline_color
             );
         } else {
             render_text(
-                element->config.text.text, font,
-                pos_converted,
+                element->config.text.text,
+                &resources->textures[element->config.text.font].data.font,
+                element->_screen_pos,
                 element->config.text.color,
-                text_scale,
+                element->config.text._screen_scale,
                 sort_order + .1f, rect_buffer
             );
         }
         break;
+    }
     /* IMAGE ******************************************************************/
-    case UI_ELEMENT_TYPE_IMAGE:
-        // render_nine_slice(
-        //     rect_buffer,
-        //     pos_converted,
-        //     size_converted,
-        //     element->config.container.bg_color,
-        //     (float)element->depth,
-        //     2,
-        //     &nine_slice_square,
-        //     true
-        // );
+    case UI_ELEMENT_TYPE_IMAGE: {
+        const i32 tex_id = element->config.image.texture.id;
+        Tex_Coords tex_coords = {0};
+        switch (element->config.image.texture.coords.mode) {
+        default: SDL_assert(0);
+            break;
+        case UI_IMAGE_TEX_MODE_FULL:
+            tex_coords = default_tex_coords();
+            break;
+        case UI_IMAGE_TEX_MODE_ATLAS_CELL_INDEX:
+            tex_coords = tex_coords_from_cell_index(
+                element->config.image.texture.coords.data.cell_index,
+                resources->textures[tex_id].data.atlas.rows,
+                resources->textures[tex_id].data.atlas.columns
+            );
+            break;
+        case UI_IMAGE_TEX_MODE_ATLAS_ROW_COLUMN:
+            tex_coords = tex_coords_from_cell(
+                element->config.image.texture.coords.data.cell.row,
+                element->config.image.texture.coords.data.cell.column,
+                resources->textures[tex_id].data.atlas.rows,
+                resources->textures[tex_id].data.atlas.columns
+            );
+            break;
+        case UI_IMAGE_TEX_MODE_BY_VALUE:
+            tex_coords = element->config.image.texture.coords.data.value;
+            break;
+        }
 
         add_rect_to_buffer(
-            rect_buffer,(Rect){
-                .pos = pos_converted,
-                // .pivot = {.5f, .5f},
+            rect_buffer, (Rect){
+                .pos = element->_screen_pos,
                 .pivot = element->config.image.pivot,
-                .size = size_converted,
+                .size = element->_screen_size,
                 .color = element->config.image.color,
                 .sort_order = (float)element->depth,
-                .texture_id = element->config.image.texture_id,
-                .tex_coords = default_rect_tex_coords()
-        });
+                .texture_id = element->config.image.texture.id,
+                .tex_coords = tex_coords,
+            }
+        );
         break;
-
-    default:
-        SDL_assert(0);
-        break;
+    }
     }
 }
 
@@ -1926,7 +2143,11 @@ void ui_context_draw(
 */
 
 #if defined(__DEBUG__)
-typedef bool (*Game_Init_Func)(CRLF_API*, Game*, UI_Context*);
+typedef bool (*Game_Init_Func)(
+    CRLF_API*, Game*, UI_Context*, Game_Resource_IDs*
+
+
+);
 typedef void (*Game_Tick_Func)(Game*, float);
 typedef void (*Game_Draw_Func)(Game*);
 typedef void (*Game_Cleanup_Func)(Game*);
@@ -1970,6 +2191,7 @@ bool duplicate_game_lib(
 bool load_game_lib(
     CRLF_API* api,
     Game* game,
+    Game_Resource_IDs* res_ids,
     Hot_Reload* hot_reload
 ) {
     SDL_PathInfo path_info;
@@ -2009,7 +2231,7 @@ bool load_game_lib(
 
 #undef LOAD_GAME_LIB_FUNC_PTR
 
-    if (!hot_reload->game_init(api, game, ui_ctx)) {
+    if (!hot_reload->game_init(api, game, ui_ctx, res_ids)) {
         log_error("Hot reload successful but game_init failed!");
         return false;
     }
@@ -2061,7 +2283,8 @@ bool hot_reload_init(
     Hot_Reload* hot_reload,
     const char* base_path,
     CRLF_API* api,
-    Game* game
+    Game* game,
+    Game_Resource_IDs* res_ids
 ) {
     hot_reload_init_lib_paths(
         base_path,
@@ -2075,7 +2298,7 @@ bool hot_reload_init(
     //Hacky way to force loading
     hot_reload->modify_time = 0;
 
-    if (!load_game_lib(api, game, hot_reload))
+    if (!load_game_lib(api, game, res_ids, hot_reload))
         return false;
 
     return true;
@@ -2128,7 +2351,6 @@ typedef struct {
     Renderer test_renderer;
     Shader_Program test_shader;
     Path asset_path;
-    Font font1, font2;
     Renderer rect_renderer;
     Shader_Program rect_shader;
     Rect_Buffer rect_buffer;
@@ -2139,6 +2361,10 @@ typedef struct {
     Shader_Program viewport_shader;
     GL_Texture_Array texture_array;
     bool has_focus;
+    bool quit_requested;
+    Game_Resource_IDs res_id;
+    Resources resources;
+    i32 num_tex_res;
     CRLF_API api;
 #if defined(__DEBUG__)
     Hot_Reload hot_reload;
@@ -2170,44 +2396,96 @@ void init_app_ptr(App* app) {
 static bool app_init(App* app) {
     const char* base_path = SDL_GetBasePath();
     asset_path_init(base_path, &app->asset_path);
-    ui_context_init(
-        (vec2){
-            (float)app->window.width,
-            (float)app->window.height
-        }
-    );
+    ui_context_init();
 
 #if defined(__DEBUG__)
-    if (!hot_reload_init(&app->hot_reload, base_path, &app->api, &app->game))
+    if (!hot_reload_init(
+        &app->hot_reload, base_path, &app->api, &app->game, &app->res_id
+    ))
         return false;
 #else
-    if (!game_init(&app->api, &app->game, ui_ctx)) return false;
+    if (!game_init(&app->api, &app->game, ui_ctx, &app->res_id)) return false;
 #endif
 
-    const i32 num_textures = 5;
-    Raw_Texture* raw_textures[] = {
-        font_load_for_array(
-            temp_path_append(app->asset_path.str, "Born2bSportyV2.ttf"),
-            &app->font1, 16, 0
+    /* TEXTURE ****************************************************************/
+    Texture_Resource texture_resources[] = {
+        texture_resource_font("Born2bSportyV2.ttf", 16, &app->res_id.font1),
+        texture_resource_atlas(
+            "nine_slice.png", 4, 4, &app->res_id.nine_slice
         ),
-        font_load_for_array(
-            temp_path_append(app->asset_path.str, "tiny.ttf"), &app->font2, 18,
-            1
-        ),
-        raw_texture_from_file(
-            temp_path_append(app->asset_path.str, "nine_slice_test.png")
-        ),
-        raw_texture_from_file(
-            temp_path_append(app->asset_path.str, "white.png")
-        ),
-        raw_texture_from_file(
-            temp_path_append(app->asset_path.str, "test_texture.png")
+        texture_resource_default("logo_crlf.png", &app->res_id.logo_crlf),
+        texture_resource_atlas("tiles.png", 4, 4, &app->res_id.tiles),
+        texture_resource_default(
+            "placeholder.png", &app->res_id.tex_placeholder
         ),
     };
+
+    const i32 num_textures = sizeof(texture_resources) / sizeof(
+        Texture_Resource);
+    Raw_Texture** raw_textures = CRLF_malloc(
+        num_textures * sizeof(Raw_Texture*)
+    );
+
+    for (int i = 0; i < num_textures; i++) {
+        Texture_Resource* tex_res = &texture_resources[i];
+        *tex_res->res_id = i;
+        switch (texture_resources[i].type) {
+        case TEXTURE_TYPE_DEFAULT:
+        case TEXTURE_TYPE_ATLAS:
+            raw_textures[i] = raw_texture_from_file(
+                temp_path_append(app->asset_path.str, tex_res->file_name)
+            );
+            break;
+        case TEXTURE_TYPE_FONT:
+            raw_textures[i] = font_load_for_array(
+                temp_path_append(app->asset_path.str, tex_res->file_name),
+                &tex_res->data.font, tex_res->data.font.size, i
+            );
+            break;
+        }
+    }
+
     app->texture_array = gl_texture_array_generate(
         &raw_textures[0], num_textures,
-        128, 128, 4, default_texture_config(), true
+        128, 128, 4, default_texture_config_gammacorrect(), true
     );
+
+    //NOTE: contents of raw_texture are freed via gl_texture_array_generate!
+    CRLF_free(raw_textures);
+
+    app->resources.num_textures = num_textures;
+    const size_t tex_res_size = num_textures * sizeof(Texture_Resource);
+    app->resources.textures = CRLF_malloc(tex_res_size);
+    SDL_memcpy(app->resources.textures, &texture_resources[0], tex_res_size);
+
+    /* NINE SLICE *************************************************************/
+    const Nine_Slice nine_slices[] = {
+        (Nine_Slice){
+            .texture_id = app->res_id.nine_slice,
+            .total_size = 32.f,
+            .border_size = 10.f,
+            .quad = tex_quad_from_cell(2, 0, 4, 4),
+            .id_ptr = &app->res_id.nine_slice_rounded_black,
+        },
+        {
+            .texture_id = app->res_id.nine_slice,
+            .total_size = 32.f,
+            .border_size = 10.f,
+            .quad = tex_quad_from_cell(2, 1, 4, 4),
+            .id_ptr = &app->res_id.nine_slice_square01_black,
+        }
+    };
+    const i32 num_nine_slices = sizeof(nine_slices) / sizeof(Nine_Slice);
+    for (int i = 0; i < num_nine_slices; i++) {
+        *nine_slices[i].id_ptr = i;
+    }
+
+    app->resources.num_nine_slices = num_nine_slices;
+    const size_t nine_slices_size = num_nine_slices * sizeof(Nine_Slice);
+    app->resources.nine_slices = CRLF_malloc(nine_slices_size);
+    SDL_memcpy(app->resources.nine_slices, &nine_slices[0], nine_slices_size);
+
+    /* SHADER******************************************************************/
 
     app->test_shader = compile_shader_program(
         test_shader_vert, test_shader_frag
@@ -2306,6 +2584,8 @@ static void app_draw(App* app) {
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     /* UI *********************************************************************/
+    const float window_width = (float)app->window.width;
+    const float window_height = (float)app->window.height;
     const float viewport_width = (float)app->viewport_ui.frame_buffer_size.x;
     const float viewport_height = (float)app->viewport_ui.frame_buffer_size.y;
     const float square_size = SDL_min(viewport_width, viewport_height);
@@ -2315,7 +2595,7 @@ static void app_draw(App* app) {
         viewport_height * 0.5f,
     };
     ui_ctx->square = (UI_Render_Square){
-        .scale_fac = 0.001f * square_size,//div by 1000
+        .scale_fac = 0.001f * square_size, //div by 1000
         .size = square_size,
         .center = square_center,
         .origin = (vec2){
@@ -2323,14 +2603,19 @@ static void app_draw(App* app) {
             square_center.y - square_size * .5f,
         }
     };
+    ui_ctx->cursor_pos =
+        (vec2){
+            (app->mouse.pos_x / window_width) * viewport_width,
+            viewport_height - (app->mouse.pos_y / window_height) *
+            viewport_height,
+        };
 
     viewport_bind(&app->viewport_ui);
     reset_rect_buffer(&app->rect_buffer);
 
-    ui_ctx->screen_size = ivec2_to_vec2(app->viewport_ui.frame_buffer_size);
+    ui_ctx->viewport_size = ivec2_to_vec2(app->viewport_ui.frame_buffer_size);
 
-    //EXPERIMENTAL UI LAYOUTING
-    //TODO: split into game_draw and game_draw_ui
+    //TODO: split into game_draw and game_draw_ui (if we will have 3d after the jam)
 #if defined(__DEBUG__)
     app->hot_reload.game_draw(&app->game);
 #else
@@ -2338,114 +2623,10 @@ static void app_draw(App* app) {
 #endif
 
     ui_tree_reindex_depth_first_to_breadth_first();
-    ui_context_draw(&app->rect_buffer, &app->font1, 0, NULL);
+    ui_context_pos_size_pass(&app->resources, 0, NULL);
+    ui_context_input_pass();
+    ui_context_rect_render_pass(&app->rect_buffer, &app->resources, 0);
     ui_context_clear();
-
-    // #define DRAW_INITIAL_RAW_UI
-#if defined(DRAW_INITIAL_RAW_UI)
-    const float window_width = (float)app->window.width;
-    const float window_height = (float)app->window.height;
-    float font_scale = 1.f;
-
-    const Font* font = &app->font1;
-    render_text(
-        STRING("Hello 7DRL 2025!"),
-        font,
-        (vec2){
-            (app->mouse.pos_x / window_width) * viewport_width,
-            viewport_height - (app->mouse.pos_y / window_height) *
-            viewport_height,
-        },
-        COLOR_WHITE,
-        font_scale, RECT_MAX_SORT_ORDER, &app->rect_buffer
-    );
-
-    const Nine_Slice nine_slice_rounded = {
-        .total_size = 32.f,
-        .border_size = 10.f,
-        .quad = {
-            .min = (vec2){0.f, .75f},
-            .max = (vec2){.25f, 1.f},
-        }
-    };
-    const Nine_Slice nine_slice_square = {
-        .total_size = 32.f,
-        .border_size = 10.f,
-        .quad = {
-            .min = (vec2){.25f, .75f},
-            .max = (vec2){.5f, 1.f},
-        }
-    };
-    render_nine_slice(
-        &app->rect_buffer,
-        square_center,
-        (vec2){square_size, square_size},
-        COLOR_WHITE,
-        0.5f,
-        2,
-        &nine_slice_square,
-        true
-    );
-
-    render_nine_slice(
-        &app->rect_buffer,
-        square_center,
-        (vec2){square_size * 0.6f, square_size},
-        COLOR_GRAY,
-        0.0f,
-        2,
-        &nine_slice_rounded,
-        true
-    );
-
-    font_scale = 2.f;
-    render_text_outlined(
-        STRING("MICRO MONARCH"),
-        font,
-        (vec2){
-            square_center.x - 11.f * font_scale * .25f * font->size,
-            square_center.y + square_size * 0.25f,
-        },
-        COLOR_YELLOW,
-        font_scale, 4.5f, &app->rect_buffer, 1.0f, COLOR_BLUE
-    );
-    const vec2 button_dist = (vec2){0, square_size * .1f};
-    vec2 button_pos = vec2_add_vec2(square_center, button_dist);
-
-    const String strings[] = {
-        STRING("NEW GAME"),
-        STRING("LOAD GAME"),
-        STRING("SETTINGS"),
-        STRING("EXIT"),
-    };
-    font_scale = 1.f;
-    for (int i = 0; i < 4; i++) {
-        render_nine_slice(
-            &app->rect_buffer,
-            button_pos,
-            (vec2){square_size * .4f, square_size * .1f},
-            COLOR_GRAY_DARK,
-            2.0f,
-            2,
-            &nine_slice_rounded,
-            true
-        );
-        render_text(
-            strings[i],
-            font,
-            vec2_sub_vec2(
-                button_pos, (vec2){
-                    (float)strings[i].length * font_scale * .25f * font->
-                    size,
-                    0
-                }
-            ),
-            COLOR_YELLOW,
-            font_scale, 3.0f, &app->rect_buffer
-        );
-        button_pos = vec2_sub_vec2(button_pos, button_dist);
-    }
-#endif
 
     /* UI BOILERPLATE **********************************************************/
     build_rect_vertex_buffer(&app->rect_buffer, &app->rect_vertex_buffer);
@@ -2489,10 +2670,8 @@ static void app_draw(App* app) {
 }
 
 static void app_cleanup(App* app) {
-    font_delete(&app->font1);
-    font_delete(&app->font2);
+    resources_cleanup(&app->resources);
     texture_array_free(&app->texture_array);
-
     delete_shader_program(&app->test_shader);
     delete_shader_program(&app->test_shader);
     delete_shader_program(&app->rect_shader);
@@ -2515,11 +2694,49 @@ static void app_cleanup(App* app) {
 }
 
 static void app_event_mouse_down(
-    const App* app,
+    App* app,
     const SDL_MouseButtonEvent event
 ) {
     switch (event.button) {
     case SDL_BUTTON_LEFT:
+        ui_ctx->input.down_id = ui_ctx->input.hover_id;
+        SDL_Log("ui_ctx->input.down_id = %u", ui_ctx->input.down_id);
+        return;
+
+    case SDL_BUTTON_RIGHT:
+    case SDL_BUTTON_MIDDLE:
+    case SDL_BUTTON_X1:
+    case SDL_BUTTON_X2:
+    default: return;
+    }
+}
+
+static void app_event_mouse_up(
+    App* app,
+    const SDL_MouseButtonEvent event
+) {
+    switch (event.button) {
+    case SDL_BUTTON_LEFT:
+        if (ui_ctx->input.down_id == 0) return;
+    //TODO: move input callbacks to game lib
+        if (ui_ctx->input.down_id == ui_ctx->input.hover_id) {
+            const u32 id = ui_ctx->input.down_id;
+            if (id == UI_ID("New Game")) {
+                log_msg("NEW GAME!");
+                app->game.is_main_menu = false;
+            } else if (id == UI_ID("Quit")) {
+                app->quit_requested = true;
+            } else if (id == UI_ID("back_id")) {
+                app->game.is_main_menu = true;
+            } else if (id == UI_ID("github")) {
+                SDL_OpenURL(
+                    "https://github.com/itsdanott/c-roguelike-framework/"
+                );
+            }
+        }
+        ui_ctx->input.down_id = 0;
+        return;
+
     case SDL_BUTTON_RIGHT:
     case SDL_BUTTON_MIDDLE:
     case SDL_BUTTON_X1:
@@ -2739,6 +2956,14 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
         app_event_mouse_down(app, event->button);
         break;
 
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        app_event_mouse_up(app, event->button);
+        break;
+
+    case SDL_EVENT_FINGER_DOWN:
+        ui_ctx->input.is_start_touch = true;
+        break;
+
     case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
         app->window.fullscreen = true;
         break;
@@ -2752,7 +2977,9 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
         app->last_tick = SDL_GetTicks();
 
 #if defined(__DEBUG__)
-        if (!load_game_lib(&app->api, &app->game, &app->hot_reload)) {
+        if (!load_game_lib(
+            &app->api, &app->game, &app->res_id, &app->hot_reload
+        )) {
             SDL_LogError(0, "Hot Reload failed!");
             return SDL_APP_FAILURE;
         }
@@ -2763,8 +2990,14 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
         app->has_focus = false;
         break;
 
-    default: return SDL_APP_CONTINUE;
+    default: break;
     }
+
+#if !defined(SDL_PLATFORM_EMSCRIPTEN)
+    if (app->quit_requested)
+        return SDL_APP_SUCCESS;
+#endif
+
     return SDL_APP_CONTINUE;
 }
 
@@ -2785,11 +3018,8 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
  */
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     if (appstate == NULL) return;
-
     App* app = (App*)appstate;
-
     app_cleanup(app);
-
     SDL_Quit();
 #if defined(__MSVC_CRT_LEAK_DETECTION__)
     _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG);
