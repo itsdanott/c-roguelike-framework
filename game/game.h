@@ -58,7 +58,7 @@ typedef enum {
     TILE_TYPE_MOUNTAIN,
     TILE_TYPE_WATER,
     TILE_TYPE_GRASS,
-    TILE_TYPE_GRID,//TOOD:remove
+    TILE_TYPE_GRID, //TOOD:remove
 } Tile_Type;
 
 typedef enum {
@@ -87,8 +87,8 @@ static ivec2 world_pos_from_tile_index_ivec2(const size_t index) {
 
 static void get_direction_from_to(
     const i32 from_x, const i32 from_y,
-    const i32 to_x, const i32 to_y,
-    i32* direction_x, i32* direction_y
+    const i32 to_x, const i32   to_y,
+    i32*      direction_x, i32* direction_y
 ) {
     *direction_x = to_x - from_x;
     *direction_y = to_y - from_y;
@@ -96,22 +96,22 @@ static void get_direction_from_to(
 
 static bool is_in_world_bounds(const i32 x, const i32 y) {
     return x < WORLD_SIZE && x >= 0 &&
-           y < WORLD_SIZE && y >= 0;
+        y < WORLD_SIZE && y >= 0;
 }
 
 typedef struct {
     Character_Type character;
-    i32 pos_x;
-    i32 pos_y;
-    i32 target_pos_x;
-    i32 target_pos_y;
-    i32 action_breaks;
+    i32            pos_x;
+    i32            pos_y;
+    i32            target_pos_x;
+    i32            target_pos_y;
+    i32            action_breaks;
 } NPC;
 
 typedef struct {
     Tile_Type tiles[WORLD_SIZE * WORLD_SIZE];
-    NPC npcs[MAX_NPCs];
-    i32 num_npcs;
+    NPC       npcs[MAX_NPCs];
+    i32       num_npcs;
 } World;
 
 typedef struct {
@@ -121,21 +121,21 @@ typedef struct {
 
 static Player default_player() {
     return (Player){
-        .pos_x = WORLD_SIZE/2,
-        .pos_y = WORLD_SIZE/2,
+        .pos_x = WORLD_SIZE / 2,
+        .pos_y = WORLD_SIZE / 2,
     };
 }
 
 typedef struct {
-    Player player;
-    i32 days;
-    i32 wood;
+    Player     player;
+    i32        days;
+    i32        wood;
     Game_State state;
-    World world;
-    i32 seed;
-    fnl_state fnl;
-    Random random;
-    bool quit_requested;
+    World      world;
+    i32        seed;
+    fnl_state  fnl;
+    Random     random;
+    bool       quit_requested;
 } Game;
 
 static Game default_game() {
@@ -151,7 +151,7 @@ GAME_API bool game_init(
     CRLF_API* new_api, Game* game, UI_Context* ui, Game_Resource_IDs* res_ids
 );
 GAME_API void game_tick(Game* game, float dt);
-GAME_API void game_draw(Game* game);
+GAME_API void game_draw(const Game* game);
 GAME_API void game_cleanup(Game* game);
 GAME_API void game_ui_input(Game* game, u32 id);
 GAME_API void game_keyboard_input(Game* game, SDL_KeyboardEvent event);

@@ -21,18 +21,18 @@ NOTE: Make sure to include SDL3 BEFORE including this header
 #define CRLF_SORT_ORDER_CLAMPED(sort_order) SDL_clamp(sort_order, CRLF_SORT_ORDER_MIN, CRLF_SORT_ORDER_MAX)
 
 /* INTEGERS *******************************************************************/
-typedef Sint8 i8;
+typedef Sint8  i8;
 typedef Sint16 i16;
 typedef Sint32 i32;
 typedef Sint64 i64;
-typedef Uint8 u8;
+typedef Uint8  u8;
 typedef Uint16 u16;
 typedef Uint32 u32;
 typedef Uint64 u64;
 
 /* STRING *********************************************************************/
 typedef struct {
-    i32 length;
+    i32         length;
     const char* chars;
 } String;
 
@@ -65,6 +65,7 @@ typedef struct {
 typedef struct {
     float x, y;
 } vec2;
+
 #define VEC2(x,y) (vec2){x,y}
 
 typedef struct {
@@ -149,11 +150,11 @@ typedef struct {
 } mat4;
 
 static mat4 mat4_ortho(
-    const float left, const float right,
+    const float left, const float   right,
     const float bottom, const float top,
     const float z_near, const float z_far
 ) {
-    mat4 result = {0};
+    mat4 result         = {0};
     result.matrix[0][0] = 2.0f / (right - left);
     result.matrix[1][1] = 2.0f / (top - bottom);
     result.matrix[2][2] = -2.0f / (z_far - z_near);
@@ -217,15 +218,15 @@ static u32 short_str_hash(String str) {
 
 /* ARENA ALLOC ****************************************************************/
 typedef struct {
-    u8* memory;
-    size_t capacity;
+    u8*       memory;
+    size_t    capacity;
     uintptr_t offset;
 } Arena;
 
 static Arena arena_init(const size_t capacity) {
     uint8_t* memory = SDL_malloc(capacity);
     SDL_assert(memory != NULL);
-    const uintptr_t memory_address = (uintptr_t)memory;
+    const uintptr_t memory_address    = (uintptr_t)memory;
     const uintptr_t next_alloc_offset = (memory_address % 64); //cache align
     return (Arena){
         .memory = memory,
@@ -270,7 +271,7 @@ static Tex_Coords default_tex_coords() {
 
 /* UI *************************************************************************/
 typedef struct UI_Context UI_Context;
-extern UI_Context* ui_ctx;
+extern UI_Context*        ui_ctx;
 
 #define UI_MAX_ELEMENTS 2048
 #define UI_STRING_ARENA_SIZE 2048
@@ -330,36 +331,36 @@ typedef struct {
 } UI_Element_Layout;
 
 typedef struct {
-    u32 id;
+    u32               id;
     UI_Element_Layout layout;
-    vec3 bg_color;
-    i32 nine_slice_id;
-    bool blocks_cursor;
-    bool is_hidden;
-    bool is_slice_center_hidden;
-    float sort_order_override;
+    vec3              bg_color;
+    i32               nine_slice_id;
+    bool              blocks_cursor;
+    bool              is_hidden;
+    bool              is_slice_center_hidden;
+    float             sort_order_override;
 } UI_Container_Config;
 
 typedef struct {
     float width;
     float height;
     float font_height;
-    int num_lines;
+    int   num_lines;
 } UI_Text_Dimension;
 
 typedef struct {
     //TODO: text wrapping rules (e.g. FIT and NO_WRAP)
-    u32 id;
+    u32               id;
     UI_Element_Layout layout;
-    u32 font;
-    String text;
-    float scale;
-    UI_Alignment align;
-    vec3 color;
-    vec3 outline_color;
-    float outline;
-    bool bg_slice;
-    i32 bg_slice_id;
+    u32               font;
+    String            text;
+    float             scale;
+    UI_Alignment      align;
+    vec3              color;
+    vec3              outline_color;
+    float             outline;
+    bool              bg_slice;
+    i32               bg_slice_id;
     //Calculated during the size_pos pass
     UI_Text_Dimension _dimension;
     //This gets calculated during the size_pos pass
@@ -383,9 +384,9 @@ typedef struct {
     UI_Image_Tex_Mode mode;
 
     union {
-        i32 cell_index;
+        i32                cell_index;
         Texture_Atlas_Cell cell;
-        Tex_Coords value;
+        Tex_Coords         value;
     } data;
 } UI_Image_Tex_Coords;
 
@@ -432,34 +433,34 @@ typedef struct {
 } UI_Image_Texture;
 
 typedef struct {
-    u32 id;
-    UI_Image_Texture texture;
+    u32               id;
+    UI_Image_Texture  texture;
     UI_Element_Layout layout;
-    vec3 color;
-    vec2 pivot;
-    bool blocks_cursor;
+    vec3              color;
+    vec2              pivot;
+    bool              blocks_cursor;
 } UI_Image_Config;
 
 typedef struct {
-    size_t index;
-    size_t depth;
-    UI_Element_Type type;
+    size_t            index;
+    size_t            depth;
+    UI_Element_Type   type;
     UI_Element_Layout layout;
 
     union {
         UI_Container_Config container;
-        UI_Text_Config text;
-        UI_Image_Config image;
+        UI_Text_Config      text;
+        UI_Image_Config     image;
     } config;
 
     size_t first_child_index;
     size_t child_count;
 
     //Calculated during the size_pos pass
-    vec2 _adjust_pos; // in square coords
+    vec2 _adjust_pos;    // in square coords
     vec2 _adjusted_size; // in square coords
     //Converted during the size_pos Pass
-    vec2 _screen_pos; //adjusted_pos converted to screen coords
+    vec2 _screen_pos;  //adjusted_pos converted to screen coords
     vec2 _screen_size; //adjusted_size converted to screen coords
 } UI_Element;
 
@@ -467,17 +468,17 @@ typedef struct {
 // ui_viewport's pixel values
 typedef struct {
     float scale_fac; //decimal factor - to avoid division by 1000.f everywhere
-    float size; //actual viewport pixel size of a square edge
-    vec2 center;
-    vec2 origin; //Bottom Left Pos
+    float size;      //actual viewport pixel size of a square edge
+    vec2  center;
+    vec2  origin; //Bottom Left Pos
 } UI_Render_Square;
 
 typedef struct {
-    bool is_hovering;
+    bool   is_hovering;
     size_t hover_element_index; //only valid when is_hovering is true
-    u32 hover_id;
+    u32    hover_id;
     //will be passed this to the next frame so that it can then be visualized by the layout (game.c)
-    u32 down_id;
+    u32  down_id;
     bool is_start_touch;
 } UI_Context_Input;
 
@@ -486,20 +487,20 @@ typedef struct {
 } UI_Context_Debug;
 
 struct UI_Context {
-    vec2 viewport_size;
-    vec2 cursor_pos;
-    UI_Element elements[UI_MAX_ELEMENTS];
-    size_t tree_depth;
-    size_t elem_count;
-    size_t temp_depth;
-    UI_Element temp_elem;
-    UI_Element temp_queue[UI_MAX_ELEMENTS];
-    size_t temp_queue_count;
-    Arena string_arena;
+    vec2             viewport_size;
+    vec2             cursor_pos;
+    UI_Element       elements[UI_MAX_ELEMENTS];
+    size_t           tree_depth;
+    size_t           elem_count;
+    size_t           temp_depth;
+    UI_Element       temp_elem;
+    UI_Element       temp_queue[UI_MAX_ELEMENTS];
+    size_t           temp_queue_count;
+    Arena            string_arena;
     UI_Render_Square square;
     UI_Context_Input input;
     UI_Context_Debug debug;
-    float time;
+    float            time;
 };
 
 static void ui_element_start() {
@@ -544,12 +545,12 @@ static void ui_container_element(const UI_Container_Config config) {
 }
 
 static void ui_text_element(
-    const String text,
+    const String         text,
     const UI_Text_Config text_config
 ) {
     ui_element_start();
-    ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_TEXT;
-    ui_ctx->temp_elem.config.text = text_config;
+    ui_ctx->temp_elem.type             = UI_ELEMENT_TYPE_TEXT;
+    ui_ctx->temp_elem.config.text      = text_config;
     ui_ctx->temp_elem.config.text.text = text;
     ui_element_set_layout(text_config.layout);
     ui_element_end();
@@ -559,11 +560,12 @@ static void ui_image_element(
     const UI_Image_Config config
 ) {
     ui_element_start();
-    ui_ctx->temp_elem.type = UI_ELEMENT_TYPE_IMAGE;
+    ui_ctx->temp_elem.type         = UI_ELEMENT_TYPE_IMAGE;
     ui_ctx->temp_elem.config.image = config;
     ui_element_set_layout(config.layout);
     ui_element_end();
 }
+
 /* RANDOM *********************************************************************/
 // XorShift128+ implementation
 typedef struct {
@@ -571,9 +573,9 @@ typedef struct {
 } Random;
 
 static u64 random_next(Random* state) {
-    uint64_t x = state->state[0];
+    uint64_t       x = state->state[0];
     uint64_t const y = state->state[1];
-    state->state[0] = y;
+    state->state[0]  = y;
     x ^= x << 23;
     state->state[1] = x ^ y ^ (x >> 17) ^ (y >> 26);
     return state->state[1] + y;
@@ -583,8 +585,8 @@ static void random_init(Random* state, const u64 seed) {
     u64 z = seed;
 
     // Apply the "splitmix64" algorithm to generate better distributed initial values
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    z               = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z               = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
     state->state[0] = z ^ (z >> 31);
 
     z = (state->state[0] ^ (state->state[0] >> 30)) * 0xbf58476d1ce4e5b9ULL;

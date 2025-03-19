@@ -49,8 +49,8 @@ Lightweight C99 framework made for 7drl 2025.
 #endif
 
 /* GLOBALS ********************************************************************/
-const char* APP_TITLE = "ROGUELIKE GAME";
-const char* APP_VERSION = "0.1.0";
+const char* APP_TITLE      = "ROGUELIKE GAME";
+const char* APP_VERSION    = "0.1.0";
 const char* APP_IDENTIFIER = "com.otone.roguelike";
 
 #if defined(SDL_PLATFORM_EMSCRIPTEN)
@@ -195,12 +195,12 @@ void renderer_cleanup(const Renderer* renderer) {
 /* PATH ***********************************************************************/
 typedef struct {
     size_t length;
-    char str[MAX_PATH_LEN];
+    char   str[MAX_PATH_LEN];
 } Path;
 
 void asset_path_init(const char* base_path, Path* asset_path) {
-    const char* asset_str = "assets";
-    const size_t str_len = SDL_strlen(base_path) + SDL_strlen(asset_str) + 4;
+    const char*  asset_str = "assets";
+    const size_t str_len   = SDL_strlen(base_path) + SDL_strlen(asset_str) + 4;
     SDL_assert(str_len < MAX_PATH_LEN);
 
 #if defined(SDL_PLATFORM_EMSCRIPTEN)
@@ -227,7 +227,7 @@ char* temp_path_append(const char* base, const char* file) {
  */
 typedef enum {
     TEXTURE_RAW_SOURCE_STB_IMAGE, //loaded via STB_Image
-    TEXTURE_RAW_SOURCE_DYNAMIC, //loaded from Memory
+    TEXTURE_RAW_SOURCE_DYNAMIC,   //loaded from Memory
 } Raw_Texture_Source;
 
 typedef struct {
@@ -236,8 +236,8 @@ typedef struct {
 } Texture_Atlas;
 
 typedef struct {
-    i32 width, height, channels;
-    u8* data;
+    i32                width, height, channels;
+    u8*                data;
     Raw_Texture_Source source;
 } Raw_Texture;
 
@@ -278,7 +278,7 @@ Raw_Texture* raw_texture_rgba_from_single_channel(
     const i32 width, const i32 height
 ) {
     Raw_Texture* raw_texture = CRLF_malloc(sizeof(Raw_Texture));
-    *raw_texture = (Raw_Texture){
+    *raw_texture             = (Raw_Texture){
         .width = width,
         .height = height,
         .channels = 4,
@@ -287,7 +287,7 @@ Raw_Texture* raw_texture_rgba_from_single_channel(
     };
 
     for (i32 i = 0; i < width * height; i++) {
-        const u8 gray_scale = single_channel_data[i];
+        const u8 gray_scale          = single_channel_data[i];
         raw_texture->data[i * 4 + 0] = gray_scale; //R
         raw_texture->data[i * 4 + 1] = gray_scale; //G
         raw_texture->data[i * 4 + 2] = gray_scale; //B
@@ -308,7 +308,7 @@ Raw_Texture* raw_texture_from_file(
     }
 
     Raw_Texture* texture = CRLF_malloc(sizeof(Raw_Texture));
-    *texture = (Raw_Texture){
+    *texture             = (Raw_Texture){
         .source = TEXTURE_RAW_SOURCE_STB_IMAGE,
     };
     texture->data = stbi_load(
@@ -346,7 +346,7 @@ void gl_texture_bind(const GL_Texture* texture, const u32 slot) {
 }
 
 GL_Texture_Format gl_texture_get_format(
-    const i32 channels,
+    const i32  channels,
     const bool gamma_correct
 ) {
     switch (channels) {
@@ -407,7 +407,7 @@ void texture_apply_config(const u32 target, const Texture_Config config) {
 }
 
 GL_Texture gl_texture_from_raw_texture(
-    const Raw_Texture* raw_texture,
+    const Raw_Texture*   raw_texture,
     const Texture_Config config
 ) {
     GL_Texture texture = {0};
@@ -440,15 +440,15 @@ void gl_texture_delete(const GL_Texture* texture) {
 
 /* TEXTURE ARRAY **************************************************************/
 typedef struct {
-    u32 id;
-    i32 num_textures;
-    i32 width, height, channels;
+    u32            id;
+    i32            num_textures;
+    i32            width, height, channels;
     Texture_Config config;
 } GL_Texture_Array;
 
 void gl_texture_array_bind(
     const GL_Texture_Array* texture_array,
-    const u32 slot
+    const u32               slot
 ) {
     SDL_assert(texture_array != NULL);
     SDL_assert(texture_array->id > 0);
@@ -458,13 +458,13 @@ void gl_texture_array_bind(
 }
 
 GL_Texture_Array gl_texture_array_generate(
-    Raw_Texture** textures,
-    const i32 num_textures,
-    const i32 width,
-    const i32 height,
-    const i32 channels,
+    Raw_Texture**        textures,
+    const i32            num_textures,
+    const i32            width,
+    const i32            height,
+    const i32            channels,
     const Texture_Config config,
-    const bool free_raw_textures
+    const bool           free_raw_textures
 ) {
     for (int i = 0; i < num_textures; i++) {
         SDL_assert(textures[i] != NULL);
@@ -535,15 +535,15 @@ typedef enum {
 } Font_Texture_Type;
 
 typedef struct {
-    stbtt_fontinfo info;
+    stbtt_fontinfo     info;
     stbtt_pack_context pack_context;
-    stbtt_packedchar char_data[FONT_UNICODE_RANGE];
-    Font_Texture_Type texture_type;
-    float size;
+    stbtt_packedchar   char_data[FONT_UNICODE_RANGE];
+    Font_Texture_Type  texture_type;
+    float              size;
 
     union {
         GL_Texture texture;
-        i32 texture_id;
+        i32        texture_id;
     } texture_union;
 } Font;
 
@@ -551,7 +551,7 @@ typedef struct {
 //If we will switch to texture arrays later on we'll need to split the logic.
 Raw_Texture* font_load_raw_texture(
     const char* file_path,
-    Font* font,
+    Font*       font,
     const float size
 ) {
     SDL_assert(font != NULL);
@@ -563,8 +563,8 @@ Raw_Texture* font_load_raw_texture(
     }
 
     SDL_IOStream* io_stream = SDL_IOFromFile(file_path, "r");
-    size_t data_size = 0;
-    u8* file_data = SDL_LoadFile_IO(io_stream, &data_size, false);
+    size_t        data_size = 0;
+    u8*           file_data = SDL_LoadFile_IO(io_stream, &data_size, false);
     SDL_CloseIO(io_stream);
     *font = (Font){0};
     if (!stbtt_InitFont(&font->info, file_data, 0)) {
@@ -607,7 +607,7 @@ bool font_load_single(const char* file_path, Font* font, const float size) {
     if (raw_texture == NULL)
         return false;
 
-    font->texture_type = FONT_TEXTURE_TYPE_SINGLE;
+    font->texture_type          = FONT_TEXTURE_TYPE_SINGLE;
     font->texture_union.texture = gl_texture_from_raw_texture(
         raw_texture, default_texture_config()
     );
@@ -639,7 +639,7 @@ typedef enum {
 } Shader_Type;
 
 typedef struct {
-    u32 id;
+    u32         id;
     Shader_Type type;
 } Shader;
 
@@ -665,7 +665,7 @@ bool check_shader_compilation(const u32 shader) {
 }
 
 Shader compile_shader(const char* source, const Shader_Type type) {
-    Shader shader = {0};
+    Shader shader         = {0};
     GLenum gl_shader_type = 0;
     switch (type) {
     case SHADER_TYPE_VERTEX:
@@ -675,7 +675,7 @@ Shader compile_shader(const char* source, const Shader_Type type) {
         gl_shader_type = GL_FRAGMENT_SHADER;
         break;
     }
-    shader.id = glCreateShader(gl_shader_type);
+    shader.id          = glCreateShader(gl_shader_type);
     const char* strs[] = {GLSL_SOURCE_HEADER, source};
     glShaderSource(shader.id, 2, strs, NULL);
     glCompileShader(shader.id);
@@ -690,7 +690,7 @@ void delete_shader(Shader* shader) {
 
 Shader_Program link_shaders(const Shader* vertex, const Shader* fragment) {
     Shader_Program program = {0};
-    program.id = glCreateProgram();
+    program.id             = glCreateProgram();
     glAttachShader(program.id, vertex->id);
     glAttachShader(program.id, fragment->id);
     glLinkProgram(program.id);
@@ -730,18 +730,18 @@ void delete_shader_program(const Shader_Program* shader) {
 
  */
 typedef struct {
-    bool is_initialized;
-    vec2 screen_pos;
+    bool  is_initialized;
+    vec2  screen_pos;
     ivec2 display_size;
     ivec2 frame_buffer_size;
     float aspect_ratio;
-    u32 frame_buffer;
-    u32 frame_buffer_texture;
-    u32 render_buffer;
+    u32   frame_buffer;
+    u32   frame_buffer_texture;
+    u32   render_buffer;
 
     //These members should be configured first
     vec4 clear_color;
-    i32 frame_buffer_divisor;
+    i32  frame_buffer_divisor;
     bool has_blending;
     bool has_depth_buffer;
     bool floating_point_precision;
@@ -766,7 +766,7 @@ Viewport default_viewport_ui() {
 #if defined(CRLF_USE_GAMEVIEWPORT)
          (vec4){0},//transparent
 #else
-         (vec4){0,0,0,1},
+        (vec4){0, 0, 0, 1},
 #endif
         .frame_buffer_divisor = 1,
         .has_blending = true,
@@ -793,11 +793,11 @@ i32 viewport_get_internal_format(
 }
 
 void viewport_generate(
-    Viewport* viewport,
+    Viewport*   viewport,
     const ivec2 display_size
 ) {
     viewport_cleanup(viewport);
-    viewport->display_size = display_size;
+    viewport->display_size      = display_size;
     viewport->frame_buffer_size = (ivec2){
         display_size.x / viewport->frame_buffer_divisor,
         display_size.y / viewport->frame_buffer_divisor,
@@ -912,8 +912,8 @@ void viewport_renderer_init(Renderer* renderer) {
 }
 
 void viewport_render_to_window(
-    const Viewport* viewport,
-    const Renderer* renderer,
+    const Viewport*       viewport,
+    const Renderer*       renderer,
     const Shader_Program* viewport_shader
 ) {
     if (viewport->has_blending) {
@@ -947,7 +947,7 @@ Tex_Quad tex_quad_from_cell(
     SDL_assert(row < rows);
     SDL_assert(column < columns);
 
-    const float cell_width = 1.0f / (float)columns;
+    const float cell_width  = 1.0f / (float)columns;
     const float cell_height = 1.0f / (float)rows;
 
     const vec2 min = (vec2){
@@ -986,7 +986,7 @@ Tex_Coords tex_coords_from_cell(
 void quad_row_and_column_from_cell_index(
     const i32 cell_index, const i32 columns, i32* row, i32* column
 ) {
-    *row = cell_index / columns;
+    *row    = cell_index / columns;
     *column = cell_index % columns;
 }
 
@@ -1008,7 +1008,7 @@ Tex_Coords tex_coords_from_cell_index(
 
 Tex_Coords tex_coords_mul_float(
     const Tex_Coords tex_coords,
-    const float factor
+    const float      factor
 ) {
     return (Tex_Coords){
         .bottom_left = vec2_mul_float(tex_coords.bottom_left, factor),
@@ -1020,7 +1020,7 @@ Tex_Coords tex_coords_mul_float(
 
 Tex_Coords tex_coords_mul_vec2(
     const Tex_Coords tex_coords,
-    const vec2 factor
+    const vec2       factor
 ) {
     return (Tex_Coords){
         .bottom_left = vec2_mul_vec2(tex_coords.bottom_left, factor),
@@ -1032,7 +1032,7 @@ Tex_Coords tex_coords_mul_vec2(
 
 Tex_Coords tex_coords_add_vec2(
     const Tex_Coords tex_coords,
-    const vec2 vec
+    const vec2       vec
 ) {
     return (Tex_Coords){
         .bottom_left = vec2_add_vec2(tex_coords.bottom_left, vec),
@@ -1044,7 +1044,7 @@ Tex_Coords tex_coords_add_vec2(
 
 Tex_Coords tex_coords_sub_vec2(
     const Tex_Coords tex_coords,
-    const vec2 vec
+    const vec2       vec
 ) {
     return (Tex_Coords){
         .bottom_left = vec2_sub_vec2(tex_coords.bottom_left, vec),
@@ -1056,7 +1056,7 @@ Tex_Coords tex_coords_sub_vec2(
 
 Tex_Coords tex_coords_map_to_quad(
     const Tex_Coords tex_coords,
-    const Tex_Quad* quad
+    const Tex_Quad*  quad
 ) {
     const vec2 scale = vec2_sub_vec2(quad->max, quad->min);
     return tex_coords_add_vec2(
@@ -1070,19 +1070,19 @@ Tex_Coords tex_coords_map_to_quad(
     caching approach we're aiming for an immediate mode approach this time.
  */
 typedef struct {
-    vec2 pos;
-    vec2 size;
-    vec3 color;
+    vec2  pos;
+    vec2  size;
+    vec3  color;
     float sort_order;
     //the vertices of the rect will be aligned relative to the pivot
     //value range 0-1, where 0 = left/bottom, 1 = right/top, {0.5,0.5} = center
-    vec2 pivot;
-    i32 texture_id;
+    vec2       pivot;
+    i32        texture_id;
     Tex_Coords tex_coords;
 } Rect;
 
 typedef struct {
-    Rect rects[RECT_BUFFER_CAPACITY];
+    Rect   rects[RECT_BUFFER_CAPACITY];
     size_t curr_len;
 } Rect_Buffer;
 
@@ -1093,8 +1093,8 @@ void add_rect_to_buffer(Rect_Buffer* rect_buffer, const Rect rect) {
 }
 
 void add_rect_to_buffer_quadmap(
-    Rect_Buffer* rect_buffer,
-    Rect rect,
+    Rect_Buffer*    rect_buffer,
+    Rect            rect,
     const Tex_Quad* quad
 ) {
     SDL_assert(quad != NULL);
@@ -1107,28 +1107,28 @@ void reset_rect_buffer(Rect_Buffer* rect_buffer) {
 }
 
 typedef struct {
-    vec2 pos;
-    vec3 color;
-    vec2 tex_coord;
+    vec2  pos;
+    vec3  color;
+    vec2  tex_coord;
     float sort_order; //Value Range SORT_ORDER_MIN - SORT_ORDER_MAX
-    i32 texture_id;
+    i32   texture_id;
 } Rect_Vertex;
 
 typedef struct {
     Rect_Vertex vertices[RECT_VERTEX_BUFFER_CAPACITY];
-    size_t curr_len;
+    size_t      curr_len;
 } Rect_Vertex_Buffer;
 
 void build_rect_vertex_buffer(
-    const Rect_Buffer* rect_buffer,
+    const Rect_Buffer*  rect_buffer,
     Rect_Vertex_Buffer* vertex_buffer
 ) {
-    size_t vertex_index = 0;
+    size_t vertex_index     = 0;
     vertex_buffer->curr_len = 0;
     if (rect_buffer->curr_len == 0) return;
     for (size_t rect_index = 0; rect_index < rect_buffer->curr_len; rect_index
          ++) {
-        Rect rect = rect_buffer->rects[rect_index];
+        Rect        rect   = rect_buffer->rects[rect_index];
         Rect_Vertex vertex = (Rect_Vertex){
             .color = rect.color,
             .sort_order = rect.sort_order,
@@ -1163,7 +1163,7 @@ void build_rect_vertex_buffer(
 //This assumes shader and texture(s) are already bound.
 void draw_rects(
     const Rect_Vertex_Buffer* vertex_buffer,
-    const Renderer* renderer
+    const Renderer*           renderer
 ) {
     if (vertex_buffer->curr_len == 0) return;
     renderer_bind(renderer);
@@ -1186,14 +1186,14 @@ UI_Text_Dimension get_text_dimension(
     const Font* font,
     const float scale
 ) {
-    float width = 0;
+    float width      = 0;
     float curr_width = 0;
-    i32 num_lines = 1;
+    i32   num_lines  = 1;
 
     while (*text) {
         const i32 codepoint = (unsigned char)*text;
         if (codepoint == '\n') {
-            width = SDL_max(curr_width, width);
+            width      = SDL_max(curr_width, width);
             curr_width = 0;
             num_lines++;
         } else {
@@ -1218,12 +1218,12 @@ UI_Text_Dimension get_text_dimension(
 }
 
 float get_text_width(const char* text, const Font* font, const float scale) {
-    float width = 0;
+    float width      = 0;
     float curr_width = 0;
     while (*text) {
         const i32 codepoint = (unsigned char)*text;
         if (codepoint == '\n') {
-            width = SDL_max(curr_width, width);
+            width      = SDL_max(curr_width, width);
             curr_width = 0;
         } else {
             const i32 char_index = codepoint - FONT_UNICODE_START;
@@ -1240,16 +1240,16 @@ float get_text_width(const char* text, const Font* font, const float scale) {
 
 void render_text(
     const String text,
-    const Font* font,
-    const vec2 pos,
-    const vec3 color,
-    const float scale,
-    const float sort_order,
+    const Font*  font,
+    const vec2   pos,
+    const vec3   color,
+    const float  scale,
+    const float  sort_order,
     Rect_Buffer* rect_buffer
 ) {
-    float x = 0, y = 0;
-    size_t glyph_iterator = 0;
-    const vec2 adjusted_pos = pos;
+    float      x              = 0, y = 0;
+    size_t     glyph_iterator = 0;
+    const vec2 adjusted_pos   = pos;
     //TODO: precalculate the text bounds and add vh centering functionality!
 
     SDL_assert(font->texture_type == FONT_TEXTURE_TYPE_ARRAY);
@@ -1294,16 +1294,16 @@ void render_text(
         quad.y0 = -quad.y0 + adjusted_pos.y;
         quad.y1 = -quad.y1 + adjusted_pos.y;
 
-        rect.pos = (vec2){quad.x0, quad.y1};
+        rect.pos  = (vec2){quad.x0, quad.y1};
         rect.size = (vec2){
             SDL_fabsf(quad.x0 - quad.x1),
             SDL_fabsf(quad.y0 - quad.y1)
         };
 
-        rect.tex_coords.bottom_left = (vec2){quad.s0, 1.0f - quad.t1};
+        rect.tex_coords.bottom_left  = (vec2){quad.s0, 1.0f - quad.t1};
         rect.tex_coords.bottom_right = (vec2){quad.s1, 1.0f - quad.t1};
-        rect.tex_coords.top_left = (vec2){quad.s0, 1.0f - quad.t0};
-        rect.tex_coords.top_right = (vec2){quad.s1, 1.0f - quad.t0};
+        rect.tex_coords.top_left     = (vec2){quad.s0, 1.0f - quad.t0};
+        rect.tex_coords.top_right    = (vec2){quad.s1, 1.0f - quad.t0};
 
         SDL_assert(
             rect_buffer->curr_len + glyph_iterator <
@@ -1320,14 +1320,14 @@ void render_text(
 //overdraw and vertex redundancy. A shader based solution would be better.
 void render_text_outlined(
     const String text,
-    const Font* font,
-    const vec2 pos,
-    const vec3 color,
-    const float scale,
-    float sort_order,
+    const Font*  font,
+    const vec2   pos,
+    const vec3   color,
+    const float  scale,
+    float        sort_order,
     Rect_Buffer* rect_buffer,
-    const float outline_offset,
-    const vec3 outline_color
+    const float  outline_offset,
+    const vec3   outline_color
 ) {
     render_text(text, font, pos, color, scale, sort_order, rect_buffer);
     sort_order -= 0.1f;
@@ -1352,23 +1352,23 @@ void render_text_outlined(
 
 /* NINE SLICE *****************************************************************/
 typedef struct {
-    i32 texture_id;
-    float total_size;
-    float border_size;
+    i32      texture_id;
+    float    total_size;
+    float    border_size;
     Tex_Quad quad;
-    i32* id_ptr;
+    i32*     id_ptr;
 } Nine_Slice;
 
 void render_nine_slice(
-    Rect_Buffer* rect_buffer,
-    const vec2 pos, // centered (equivalent to pivot = 0.5, 0.5)
-    const vec2 size,
-    const vec3 color,
-    const float sort_order,
+    Rect_Buffer*      rect_buffer,
+    const vec2        pos, // centered (equivalent to pivot = 0.5, 0.5)
+    const vec2        size,
+    const vec3        color,
+    const float       sort_order,
     const Nine_Slice* nine_slice,
-    bool render_center
+    bool              render_center
 ) {
-    const vec2 half_size = vec2_mul_float(size, .5f);
+    const vec2 half_size   = vec2_mul_float(size, .5f);
     const vec2 border_size = (vec2){
         nine_slice->border_size,
         nine_slice->border_size
@@ -1385,8 +1385,8 @@ void render_nine_slice(
     //TODO: assert for size < border_size
 
     //bottom left
-    rect.pivot = (vec2){0.f, 0.f};
-    rect.pos = vec2_sub_vec2(pos, half_size);
+    rect.pivot      = (vec2){0.f, 0.f};
+    rect.pos        = vec2_sub_vec2(pos, half_size);
     rect.tex_coords = tex_coords_mul_float(
         default_tex_coords(),
         bs_normalized
@@ -1394,8 +1394,8 @@ void render_nine_slice(
     add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
 
     //bottom right
-    rect.pos = vec2_add_vec2(rect.pos, (vec2){size.x, 0});
-    rect.pivot = (vec2){1.f, 0.f};
+    rect.pos        = vec2_add_vec2(rect.pos, (vec2){size.x, 0});
+    rect.pivot      = (vec2){1.f, 0.f};
     rect.tex_coords = tex_coords_add_vec2(
         rect.tex_coords,
         (vec2){1.f - bs_normalized, 0.f}
@@ -1403,8 +1403,8 @@ void render_nine_slice(
     add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
 
     //top right
-    rect.pos = vec2_add_vec2(rect.pos, (vec2){0, size.y});
-    rect.pivot = (vec2){1.f, 1.f};
+    rect.pos        = vec2_add_vec2(rect.pos, (vec2){0, size.y});
+    rect.pivot      = (vec2){1.f, 1.f};
     rect.tex_coords = tex_coords_add_vec2(
         rect.tex_coords,
         (vec2){0.f, 1.f - bs_normalized}
@@ -1412,8 +1412,8 @@ void render_nine_slice(
     add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
 
     //top left
-    rect.pos = vec2_sub_vec2(rect.pos, (vec2){size.x, 0.f});
-    rect.pivot = (vec2){0.f, 1.f};
+    rect.pos        = vec2_sub_vec2(rect.pos, (vec2){size.x, 0.f});
+    rect.pivot      = (vec2){0.f, 1.f};
     rect.tex_coords = tex_coords_sub_vec2(
         rect.tex_coords,
         (vec2){1.f - bs_normalized, 0.f}
@@ -1421,9 +1421,9 @@ void render_nine_slice(
     add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
 
     //bottom
-    rect.pos = vec2_sub_vec2(pos, (vec2){0, half_size.y});
+    rect.pos   = vec2_sub_vec2(pos, (vec2){0, half_size.y});
     rect.pivot = (vec2){.5f, 0.f};
-    rect.size = (vec2){
+    rect.size  = (vec2){
         size.x - nine_slice->border_size * 2.f,
         nine_slice->border_size,
     };
@@ -1436,8 +1436,8 @@ void render_nine_slice(
     add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
 
     //top
-    rect.pos = vec2_add_vec2(pos, (vec2){0, half_size.y});
-    rect.pivot = (vec2){.5f, 1.f};
+    rect.pos        = vec2_add_vec2(pos, (vec2){0, half_size.y});
+    rect.pivot      = (vec2){.5f, 1.f};
     rect.tex_coords = tex_coords_add_vec2(
         rect.tex_coords, (vec2){
             0.f, 1.f - bs_normalized,
@@ -1446,9 +1446,9 @@ void render_nine_slice(
     add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
 
     //left
-    rect.pos = vec2_sub_vec2(pos, (vec2){half_size.x, 0.f});
+    rect.pos   = vec2_sub_vec2(pos, (vec2){half_size.x, 0.f});
     rect.pivot = (vec2){0.f, 0.5f};
-    rect.size = (vec2){
+    rect.size  = (vec2){
         nine_slice->border_size,
         size.y - nine_slice->border_size * 2.f,
     };
@@ -1461,8 +1461,8 @@ void render_nine_slice(
     add_rect_to_buffer_quadmap(rect_buffer, rect, &nine_slice->quad);
 
     //right
-    rect.pos = vec2_add_vec2(pos, (vec2){half_size.x, 0.f});
-    rect.pivot = (vec2){1.f, 0.5f};
+    rect.pos        = vec2_add_vec2(pos, (vec2){half_size.x, 0.f});
+    rect.pivot      = (vec2){1.f, 0.5f};
     rect.tex_coords = tex_coords_add_vec2(
         rect.tex_coords, (vec2){
             1.f - bs_normalized, 0.f
@@ -1472,9 +1472,9 @@ void render_nine_slice(
 
     //center
     if (render_center) {
-        rect.pos = pos;
-        rect.size = vec2_sub_float(size, nine_slice->border_size * 2.f);
-        rect.pivot = (vec2){.5f, .5f};
+        rect.pos        = pos;
+        rect.size       = vec2_sub_float(size, nine_slice->border_size * 2.f);
+        rect.pivot      = (vec2){.5f, .5f};
         rect.tex_coords = (Tex_Coords){
             .bottom_left = {bs_normalized, bs_normalized},
             .bottom_right = {1.f - bs_normalized, bs_normalized},
@@ -1498,12 +1498,12 @@ typedef enum {
 } Texture_Type;
 
 typedef struct {
-    const char* file_name;
+    const char*  file_name;
     Texture_Type type;
 
     union {
         //This is a bit un intuitive to have the font in here but works for now..
-        Font font;
+        Font          font;
         Texture_Atlas atlas;
     } data;
 
@@ -1553,9 +1553,9 @@ Texture_Resource texture_resource_atlas(
 /* RESOURCES ******************************************************************/
 typedef struct {
     Texture_Resource* textures;
-    i32 num_textures;
-    Nine_Slice* nine_slices;
-    i32 num_nine_slices;
+    i32               num_textures;
+    Nine_Slice*       nine_slices;
+    i32               num_nine_slices;
 } Resources;
 
 void resources_cleanup(const Resources* resources) {
@@ -1582,10 +1582,10 @@ typedef struct {
 
 /* WINDOW *********************************************************************/
 typedef struct {
-    SDL_Window* sdl;
+    SDL_Window*   sdl;
     SDL_GLContext gl_context;
-    i32 width, height;
-    bool fullscreen;
+    i32           width, height;
+    bool          fullscreen;
 } Window;
 
 /* UI ******* *****************************************************************/
@@ -1716,12 +1716,12 @@ void ui_context_cleanup() {
 }
 
 void ui_context_clear() {
-    ui_ctx->elem_count = 0;
-    ui_ctx->tree_depth = 0;
-    ui_ctx->temp_depth = 0;
-    ui_ctx->temp_elem = (UI_Element){0};
+    ui_ctx->elem_count       = 0;
+    ui_ctx->tree_depth       = 0;
+    ui_ctx->temp_depth       = 0;
+    ui_ctx->temp_elem        = (UI_Element){0};
     ui_ctx->temp_queue_count = 0;
-    ui_ctx->debug = (UI_Context_Debug){0};
+    ui_ctx->debug            = (UI_Context_Debug){0};
     arena_clear(&ui_ctx->string_arena);
 }
 
@@ -1736,7 +1736,7 @@ void ui_tree_reindex_depth_first_to_breadth_first() {
     }
 
     //Then we assign new indices by summing up all depths before the current one
-    size_t new_indices[UI_MAX_ELEMENTS] = {0};
+    size_t new_indices[UI_MAX_ELEMENTS]         = {0};
     size_t per_depth_iterators[UI_MAX_ELEMENTS] = {0};
     for (size_t i = 0; i < ui_ctx->elem_count; i++) {
         const UI_Element* element = &ui_ctx->elements[i];
@@ -1756,7 +1756,7 @@ void ui_tree_reindex_depth_first_to_breadth_first() {
         if (element.child_count > 0) {
             element.first_child_index = new_indices[element.first_child_index];
         }
-        element.index = new_indices[i];
+        element.index                      = new_indices[i];
         reindexed_elements[new_indices[i]] = element;
     }
 
@@ -1799,15 +1799,15 @@ bool point_inside_box(const UI_Box box, const vec2 point) {
 
 //Adjusts the ui elements position and converts from square to screen coordinates
 void ui_context_pos_size_pass(
-    Resources* resources,
-    const size_t index,
+    Resources*        resources,
+    const size_t      index,
     const UI_Element* parent
 ) {
     if (index >= ui_ctx->elem_count) return;
     UI_Element* element = &ui_ctx->elements[index];
 
-    const bool is_root = parent == NULL;
-    const vec2 parent_pos = is_root ? VEC2(500, 500) : parent->_adjust_pos;
+    const bool is_root     = parent == NULL;
+    const vec2 parent_pos  = is_root ? VEC2(500, 500) : parent->_adjust_pos;
     const vec2 parent_size = is_root
                                  ? VEC2(1000, 1000)
                                  : parent->_adjusted_size;
@@ -1854,7 +1854,7 @@ void ui_context_pos_size_pass(
         const float text_scale = element->config.text._screen_scale;
 
         UI_Text_Dimension* txt = &element->config.text._dimension;
-        *txt = get_text_dimension(
+        *txt                   = get_text_dimension(
             element->config.text.text.chars, font, text_scale
         );
         element->_screen_size = VEC2(txt->width, txt->height);
@@ -1899,14 +1899,14 @@ void ui_context_pos_size_pass(
 }
 
 void ui_context_input_pass_element_hover_check(
-    const UI_Box box,
+    const UI_Box      box,
     const UI_Element* element
 ) {
     const bool is_hovering = point_inside_box(box, ui_ctx->cursor_pos);
 
     if (is_hovering) {
         if (!ui_ctx->input.is_hovering) {
-            ui_ctx->input.is_hovering = true;
+            ui_ctx->input.is_hovering         = true;
             ui_ctx->input.hover_element_index = element->index;
             //TODO: touch edge case
         } else if (ui_ctx->elements[ui_ctx->input.hover_element_index].depth <
@@ -1975,9 +1975,9 @@ void ui_context_input_pass_recursion(
 //Identifies interactions (hovered element, scroll etc)
 void ui_context_input_pass() {
     const bool was_start_touch = ui_ctx->input.is_start_touch;
-    const u32 temp_down_id = ui_ctx->input.down_id;
-    ui_ctx->input = (UI_Context_Input){0};
-    ui_ctx->input.down_id = temp_down_id;
+    const u32  temp_down_id    = ui_ctx->input.down_id;
+    ui_ctx->input              = (UI_Context_Input){0};
+    ui_ctx->input.down_id      = temp_down_id;
 
     ui_context_input_pass_recursion(0);
 
@@ -1996,12 +1996,12 @@ void ui_context_input_pass() {
 //Adds the UI layout to the rect buffer
 void ui_context_rect_render_pass(
     Rect_Buffer* rect_buffer,
-    Resources* resources,
+    Resources*   resources,
     const size_t index,
-    const float sort_order_override
+    const float  sort_order_override
 ) {
     if (index >= ui_ctx->elem_count) return;
-    UI_Element* element = &ui_ctx->elements[index];
+    UI_Element* element    = &ui_ctx->elements[index];
     const float sort_order = CRLF_SORT_ORDER_CLAMPED(
         sort_order_override != 0 ? sort_order_override + (float)element->depth :
         (float)element->depth
@@ -2099,7 +2099,7 @@ void ui_context_rect_render_pass(
     }
     /* IMAGE ******************************************************************/
     case UI_ELEMENT_TYPE_IMAGE: {
-        const i32 tex_id = element->config.image.texture.id;
+        const i32  tex_id     = element->config.image.texture.id;
         Tex_Coords tex_coords = {0};
         switch (element->config.image.texture.coords.mode) {
         default: SDL_assert(0);
@@ -2169,6 +2169,7 @@ typedef bool (*Game_Init_Func)(
 
 
 );
+
 typedef void (*Game_Tick_Func)(Game*, float);
 typedef void (*Game_Draw_Func)(Game*);
 typedef void (*Game_Cleanup_Func)(Game*);
@@ -2176,15 +2177,15 @@ typedef void (*Game_UI_Input_Func)(Game*, u32);
 typedef void (*Game_Keyboard_Input_Func)(Game*, SDL_KeyboardEvent);
 
 typedef struct {
-    Path lib_path;
-    Path temp_lib_path;
-    SDL_Time modify_time;
-    SDL_SharedObject* lib_obj;
-    Game_Init_Func game_init;
-    Game_Tick_Func game_tick;
-    Game_Draw_Func game_draw;
-    Game_Cleanup_Func game_cleanup;
-    Game_UI_Input_Func game_ui_input;
+    Path                     lib_path;
+    Path                     temp_lib_path;
+    SDL_Time                 modify_time;
+    SDL_SharedObject*        lib_obj;
+    Game_Init_Func           game_init;
+    Game_Tick_Func           game_tick;
+    Game_Draw_Func           game_draw;
+    Game_Cleanup_Func        game_cleanup;
+    Game_UI_Input_Func       game_ui_input;
     Game_Keyboard_Input_Func game_keyboard_input;
 } Hot_Reload;
 
@@ -2214,10 +2215,10 @@ bool duplicate_game_lib(
 }
 
 bool load_game_lib(
-    CRLF_API* api,
-    Game* game,
+    CRLF_API*          api,
+    Game*              game,
     Game_Resource_IDs* res_ids,
-    Hot_Reload* hot_reload
+    Hot_Reload*        hot_reload
 ) {
     SDL_PathInfo path_info;
     if (!SDL_GetPathInfo(hot_reload->lib_path.str, &path_info) || path_info
@@ -2237,7 +2238,7 @@ bool load_game_lib(
         return false;
 
     hot_reload->modify_time = path_info.modify_time;
-    hot_reload->lib_obj = SDL_LoadObject(hot_reload->temp_lib_path.str);
+    hot_reload->lib_obj     = SDL_LoadObject(hot_reload->temp_lib_path.str);
     if (hot_reload->lib_obj == NULL) {
         SDL_LogError(0, "load game lib object: %s", SDL_GetError());
         return false;
@@ -2269,8 +2270,8 @@ bool load_game_lib(
 
 void hot_reload_init_lib_paths(
     const char* base_path,
-    Path* lib_path,
-    Path* temp_lib_path
+    Path*       lib_path,
+    Path*       temp_lib_path
 ) {
     //NOTE: hard coded filename as this is only for development!
     const char* lib_name =
@@ -2294,7 +2295,7 @@ void hot_reload_init_lib_paths(
 
     //Temp Path
     {
-        const char* temp_str = "temp_";
+        const char*  temp_str     = "temp_";
         const size_t temp_str_len = SDL_strlen(base_path) + SDL_strlen(temp_str)
             + SDL_strlen(lib_name);
         SDL_assert(temp_str_len < MAX_PATH_LEN);
@@ -2307,10 +2308,10 @@ void hot_reload_init_lib_paths(
 }
 
 bool hot_reload_init(
-    Hot_Reload* hot_reload,
-    const char* base_path,
-    CRLF_API* api,
-    Game* game,
+    Hot_Reload*        hot_reload,
+    const char*        base_path,
+    CRLF_API*          api,
+    Game*              game,
     Game_Resource_IDs* res_ids
 ) {
     hot_reload_init_lib_paths(
@@ -2372,29 +2373,29 @@ void log_error(const char* fmt, ...) {
 /* APP ************************************************************************/
 typedef struct {
     Window window;
-    Game game;
-    Mouse mouse;
-    u64 last_tick;
-    Path asset_path;
+    Game   game;
+    Mouse  mouse;
+    u64    last_tick;
+    Path   asset_path;
 
-    Renderer rect_renderer;
-    Shader_Program rect_shader;
-    Rect_Buffer rect_buffer;
+    Renderer           rect_renderer;
+    Shader_Program     rect_shader;
+    Rect_Buffer        rect_buffer;
     Rect_Vertex_Buffer rect_vertex_buffer;
 
 #if defined(CRLF_USE_GAMEVIEWPORT)
     Viewport viewport_game;
 #endif
-    Viewport viewport_ui;
-    Renderer viewport_renderer;
+    Viewport       viewport_ui;
+    Renderer       viewport_renderer;
     Shader_Program viewport_shader;
 
-    GL_Texture_Array texture_array;
-    bool has_focus;
+    GL_Texture_Array  texture_array;
+    bool              has_focus;
     Game_Resource_IDs res_id;
-    Resources resources;
-    i32 num_tex_res;
-    CRLF_API api;
+    Resources         resources;
+    i32               num_tex_res;
+    CRLF_API          api;
 #if defined(__DEBUG__)
     Hot_Reload hot_reload;
 #endif
@@ -2460,7 +2461,7 @@ static bool app_init(App* app) {
 
     for (int i = 0; i < num_textures; i++) {
         Texture_Resource* tex_res = &texture_resources[i];
-        *tex_res->res_id = i;
+        *tex_res->res_id          = i;
         switch (texture_resources[i].type) {
         case TEXTURE_TYPE_DEFAULT:
         case TEXTURE_TYPE_ATLAS:
@@ -2486,8 +2487,8 @@ static bool app_init(App* app) {
     CRLF_free(raw_textures);
 
     app->resources.num_textures = num_textures;
-    const size_t tex_res_size = num_textures * sizeof(Texture_Resource);
-    app->resources.textures = CRLF_malloc(tex_res_size);
+    const size_t tex_res_size   = num_textures * sizeof(Texture_Resource);
+    app->resources.textures     = CRLF_malloc(tex_res_size);
     SDL_memcpy(app->resources.textures, &texture_resources[0], tex_res_size);
 
     /* NINE SLICE *************************************************************/
@@ -2513,8 +2514,8 @@ static bool app_init(App* app) {
     }
 
     app->resources.num_nine_slices = num_nine_slices;
-    const size_t nine_slices_size = num_nine_slices * sizeof(Nine_Slice);
-    app->resources.nine_slices = CRLF_malloc(nine_slices_size);
+    const size_t nine_slices_size  = num_nine_slices * sizeof(Nine_Slice);
+    app->resources.nine_slices     = CRLF_malloc(nine_slices_size);
     SDL_memcpy(app->resources.nine_slices, &nine_slices[0], nine_slices_size);
 
     /* SHADER******************************************************************/
@@ -2622,8 +2623,12 @@ static void app_draw(App* app) {
     const float window_height = (float)app->window.height;
     const float viewport_width = (float)app->viewport_ui.frame_buffer_size.x;
     const float viewport_height = (float)app->viewport_ui.frame_buffer_size.y;
-    const int framebuffer_size_min = SDL_min(app->viewport_ui.frame_buffer_size.x, app->viewport_ui.frame_buffer_size.y);
-    const float square_size = (float)(framebuffer_size_min - (framebuffer_size_min % 2));
+    const int   framebuffer_size_min = SDL_min(
+        app->viewport_ui.frame_buffer_size.x,
+        app->viewport_ui.frame_buffer_size.y
+    );
+    const float square_size = (float)(framebuffer_size_min - (
+        framebuffer_size_min % 2));
 
     const vec2 square_center = (vec2){
         viewport_width * 0.5f,
@@ -2647,9 +2652,14 @@ static void app_draw(App* app) {
 
 #if defined(CRLF_USE_SQUARE_SCISSOR)
     glEnable(GL_SCISSOR_TEST);
-    const int viewport_min = SDL_min(viewport_width, viewport_height);
-    const ivec2 viewport_center = (ivec2){(int)(viewport_width*0.5f), (int)(viewport_height*0.5f)};
-    glScissor(viewport_center.x - viewport_min/2, viewport_center.y - viewport_min/2, viewport_min, viewport_min);
+    const int   viewport_min    = SDL_min(viewport_width, viewport_height);
+    const ivec2 viewport_center = (ivec2){
+        (int)(viewport_width * 0.5f), (int)(viewport_height * 0.5f)
+    };
+    glScissor(
+        viewport_center.x - viewport_min / 2,
+        viewport_center.y - viewport_min / 2, viewport_min, viewport_min
+    );
 #endif
 
     viewport_bind(&app->viewport_ui);
@@ -2743,7 +2753,7 @@ static void app_cleanup(App* app) {
 }
 
 static void app_event_mouse_down(
-    App* app,
+    App*                       app,
     const SDL_MouseButtonEvent event
 ) {
     switch (event.button) {
@@ -2760,7 +2770,7 @@ static void app_event_mouse_down(
 }
 
 static void app_event_mouse_up(
-    App* app,
+    App*                       app,
     const SDL_MouseButtonEvent event
 ) {
     switch (event.button) {
@@ -2815,6 +2825,8 @@ static void app_event_key_down(App* app, const SDL_KeyboardEvent event) {
         return;
     default:
 #endif
+
+
     }
 }
 
@@ -2873,12 +2885,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
 #if !defined(SDL_PLATFORM_EMSCRIPTEN)
     //Part of the UI simplification fallback approach @ day 4 (end-jam)
     //make 1:1 aspect ratio fit the display for desktop
-    const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+    const SDL_DisplayID    display = SDL_GetPrimaryDisplay();
     const SDL_DisplayMode* display_mode = SDL_GetDesktopDisplayMode(display);
-    const i32 smaller_display_size = (i32)((float)SDL_min(
+    const i32              smaller_display_size = (i32)((float)SDL_min(
         display_mode->w, display_mode->h
     ) * 0.9f);
-    app->window.width = smaller_display_size;
+    app->window.width  = smaller_display_size;
     app->window.height = smaller_display_size;
 #endif
 
@@ -2986,7 +2998,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
             "Window Resized: callback data: %dx%d",
             event->window.data1, event->window.data2
         );
-        app->window.width = event->window.data1;
+        app->window.width  = event->window.data1;
         app->window.height = event->window.data2;
 #if defined(CRLF_USE_GAMEVIEWPORT)
         viewport_generate(

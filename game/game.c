@@ -1,15 +1,13 @@
-
 #define FNL_IMPL
 
 #include "game.h"
 
-static CRLF_API* api;
+static CRLF_API*          api;
 static Game_Resource_IDs* res_id;
 
 static const char* GAME_TITLE = "Micro Monarch";
 
 /* TILES **********************************************************************/
-//TODO: Atlas Cells
 #define TXC_TILE_FOREST_01 ui_image_tex_coords_atlas_row_colum(3,0)
 #define TXC_TILE_MOUNTAIN_01 ui_image_tex_coords_atlas_row_colum(3,1)
 #define TXC_TILE_WATER_01 ui_image_tex_coords_atlas_row_colum(3,2)
@@ -19,15 +17,15 @@ static const char* GAME_TITLE = "Micro Monarch";
 #define TXC_TILE_GRID ui_image_tex_coords_atlas_row_colum(3,3)
 
 /* CHARACTERS******************************************************************/
-
 #define TXC_CHARACTER_MONARCH ui_image_tex_coords_atlas_row_colum(0,0)
 #define TXC_CHARACTER_DEER ui_image_tex_coords_atlas_row_colum(3,0)
 
 /* UI *************************************************************************/
 #define ROOT_LAYOUT root_container_layout()
+#define GAME_SIDEBAR_WIDTH 350.f
 
 UI_Element_Layout root_container_layout() {
-    return (UI_Element_Layout) {
+    return (UI_Element_Layout){
         .anchor = UI_ANCHOR_CENTER,
         .size = {1000.f, 1000.f},
     };
@@ -37,6 +35,19 @@ UI_Element_Layout root_container_layout() {
 UI_Context* ui_ctx;
 #endif
 
+/* STRUCTS ********************************************************************/
+typedef struct {
+    String title;
+    String desc;
+    u32    id;
+} Action_Info;
+
+typedef struct {
+    u32    btn;
+    String str;
+} Game_About_Entry;
+
+/* UI MACROS ******************************************************************/
 #define UI_BUTTON(button_id) \
 const u32 button_id = UI_ID(#button_id); \
 const bool button_id##_hover = ui_ctx->input.hover_id == button_id;\
@@ -54,8 +65,32 @@ const u32 button = button_id; \
 const bool button##_hover = ui_ctx->input.hover_id == button_id;\
 const bool button##_down = ui_ctx->input.down_id == button_id;
 
+UI_Image_Tex_Coords tex_coords_from_tile(const Tile_Type tile_type) {
+    switch (tile_type) {
+    case TILE_TYPE_FOREST: return TXC_TILE_FOREST_01;
+    case TILE_TYPE_MOUNTAIN: return TXC_TILE_MOUNTAIN_01;
+    case TILE_TYPE_WATER: return TXC_TILE_WATER_01;
+    case TILE_TYPE_GRASS: return TXC_TILE_GRASS_01;
+    case TILE_TYPE_GRID: return TXC_TILE_GRID;
+    }
+    SDL_assert(0);
+    return (UI_Image_Tex_Coords){0};
+}
+
+UI_Image_Tex_Coords tex_coords_from_character(const Character_Type character) {
+    switch (character) {
+    case CHARACTER_TYPE_MONARCH: return TXC_CHARACTER_MONARCH;
+    case CHARACTER_TYPE_DEER: return TXC_CHARACTER_DEER;
+    default:
+        break;
+    }
+    SDL_assert(0);
+    return (UI_Image_Tex_Coords){0};
+}
+
+/* UI DRAWING******************************************************************/
 void draw_menu_entry(
-    const int row, const String label, const String value, vec3 color
+const int row, const String label, const String value, vec3 color
 ) {
     const float anchor_y =  1.f - (float)(row+1) * 0.1725f;
     UI_TEXT(label, {
@@ -109,36 +144,13 @@ void draw_nav_button(
     }
 }
 
-UI_Image_Tex_Coords tex_coords_from_tile(const Tile_Type tile_type) {
-    switch (tile_type) {
-    case TILE_TYPE_FOREST: return TXC_TILE_FOREST_01;
-    case TILE_TYPE_MOUNTAIN: return TXC_TILE_MOUNTAIN_01;
-    case TILE_TYPE_WATER: return TXC_TILE_WATER_01;
-    case TILE_TYPE_GRASS: return TXC_TILE_GRASS_01;
-    case TILE_TYPE_GRID: return TXC_TILE_GRID;
-    }
-    SDL_assert(0);
-    return (UI_Image_Tex_Coords){0};
-}
-
-UI_Image_Tex_Coords tex_coords_from_character(const Character_Type character) {
-    switch (character) {
-    case CHARACTER_TYPE_MONARCH: return TXC_CHARACTER_MONARCH;
-    case CHARACTER_TYPE_DEER: return TXC_CHARACTER_DEER;
-    default:
-        break;
-    }
-    SDL_assert(0);
-    return (UI_Image_Tex_Coords){0};
-}
-
 void draw_character(
     const Character_Type character,
-    const float x,
-    const float y,
-    const float tile_size
+    const float          x,
+    const float          y,
+    const float          tile_size
 ) {
-    const vec2 tile_size_vec =  {tile_size, tile_size};
+    const vec2 tile_size_vec             =  {tile_size, tile_size};
     const UI_Image_Tex_Coords tex_coords = tex_coords_from_character(character);
     switch (character) {
     default:
@@ -162,15 +174,16 @@ void draw_character(
         break;
     }
 }
+
 void draw_tile(
     const Tile_Type tile_type,
-    const float x,
-    const float y,
-    const float tile_size,
-    const i32 world_x,
-    const i32 world_y
+    const float     x,
+    const float     y,
+    const float     tile_size,
+    const i32       world_x,
+    const i32       world_y
 ) {
-    const vec2 tile_size_vec =  {tile_size, tile_size};
+    const vec2 tile_size_vec             =  {tile_size, tile_size};
     const UI_Image_Tex_Coords tex_coords = tex_coords_from_tile(tile_type);
     switch (tile_type) {
     default:
@@ -205,8 +218,10 @@ void draw_tile(
             .layout = {
                 .anchor = {0.0f, 0.0f},
                 .offset = {
-                    x * tile_size + SDL_sin((ui_ctx->time + world_x*world_y) *wave_strength) * tile_size * wave_displace / 40.f,
-                    y * tile_size + SDL_sin((ui_ctx->time  + world_x) * wave_strength * .75f) * tile_size * wave_displace / 20.f,
+                    x * tile_size + SDL_sin((ui_ctx->time + world_x*world_y) *
+                wave_strength) * tile_size * wave_displace / 40.f,
+                    y * tile_size + SDL_sin((ui_ctx->time + world_x) *
+                wave_strength * .75f) * tile_size * wave_displace / 20.f,
                     },
                 .size = tile_size_vec,
             },
@@ -218,8 +233,8 @@ void draw_tile(
 
 void draw_game_world(const Game* game) {
     const int tiles_in_view = 11;
-    const int center = tiles_in_view/2;
-    const float tile_size = 650.f / (float)tiles_in_view;
+    const int center        = tiles_in_view/2;
+    const float tile_size   = 650.f / (float)tiles_in_view;
 
     const i32 bottom_left_x = game->player.pos_x - center;
     const i32 bottom_left_y = game->player.pos_y - center;
@@ -274,10 +289,6 @@ void draw_game_world(const Game* game) {
                     );
                 }
             }
-           //  draw_tile(
-           //     TILE_TYPE_GRID, (float)center, (float)center, tile_size
-           // );
-
         }
     }
 }
@@ -316,7 +327,7 @@ void draw_game_menu_top_bar() {
         });
     }
 }
-#define GAME_SIDEBAR_WIDTH 350.f
+
 void draw_game_menu_side_bar(const Game* game) {
     UI({
         .id = UI_ID("SideBar"),
@@ -412,17 +423,11 @@ void draw_game_menu_navigation(const float nav_size){
     }
 }
 
-typedef struct {
-    String title;
-    String desc;
-    u32 id;
-} Action_Info;
-
 void draw_action_btn(
     const Action_Info action,
-    const float width,
-    const float height,
-    const bool is_a
+    const float       width,
+    const float       height,
+    const bool        is_a
 ) {
 
     UI_BUTTON_ID(btn, action.id)
@@ -431,7 +436,6 @@ void draw_action_btn(
         .layout = {
             .anchor = {is_a ? 0.25f : 0.75f,  0.5f},
             .size =   {width, height},
-            // .offset = {(is_a ? 1.f : -1.f) * width * 0.5f, 0.f},
         },
         .bg_color = btn_down ? COLOR_MAGENTA : COLOR_GRAY_DARK,
         .blocks_cursor = true,
@@ -503,11 +507,13 @@ void draw_game_menu_actions(const float nav_size) {
         draw_action_btn(action_b, action_width, nav_size, false);
     }
 }
+
 void draw_game_menu_bottom() {
     const float nav_size = 285.f;
     draw_game_menu_navigation(nav_size);
     draw_game_menu_actions(nav_size);
 }
+
 void draw_gameplay(const Game* game) {
     UI({
         .layout = ROOT_LAYOUT,
@@ -576,28 +582,23 @@ void draw_new_game_menu(){
 }
 
 void draw_settings_menu(){
-     UI({
-         .layout = ROOT_LAYOUT,
-         .bg_color = COLOR_GRAY_DARK,
-     }){
-         UI({
-             .layout = {
-                 .anchor = UI_ANCHOR_CENTER,
-                 .offset = {0.f,0.f},
-                 .size = {250.f,450.f},
-             },
-             .bg_color = COLOR_RED,
-         }) {
+    UI({
+        .layout = ROOT_LAYOUT,
+        .bg_color = COLOR_GRAY_DARK,
+    }){
+        UI({
+            .layout = {
+                .anchor = UI_ANCHOR_CENTER,
+                .offset = {0.f,0.f},
+                .size = {250.f,450.f},
+            },
+            .bg_color = COLOR_RED,
+        }) {
 
             draw_sub_menu_skeleton(STRING("Settings"));
-         }
-     }
+        }
+    }
 }
-
-typedef struct {
-    u32 btn;
-    String str;
-} Game_About_Entry;
 
 void draw_about_game_menu(){
     UI({
@@ -798,8 +799,9 @@ void draw_main_menu() {
     }
 }
 
+/* GAMEPLAY *******************************************************************/
 void npc_set_random_target_pos(Random* random, NPC* npc) {
-    const ivec2 current_target_pos = (ivec2) {
+    const ivec2 current_target_pos = (ivec2){
         npc->target_pos_x, npc->target_pos_y
     };
 
@@ -819,45 +821,45 @@ void npc_set_random_target_pos(Random* random, NPC* npc) {
         npc->pos_y == npc->target_pos_y
     );
 }
+
 void generate_world(Game* game) {
-    game->fnl = fnlCreateState();
+    game->fnl      = fnlCreateState();
     game->fnl.seed = game->seed;
     random_init(&game->random, game->seed);
 
     for (int x = 0; x < WORLD_SIZE; x++) {
         for (int y = 0; y < WORLD_SIZE; y++) {
             const float noise = fnlGetNoise2D(&game->fnl, (float)x, (float)y);
-            Tile_Type tile;
+            Tile_Type   tile;
             if (noise <= 0.25f) {
-                tile =  TILE_TYPE_WATER;
+                tile = TILE_TYPE_WATER;
             } else if (noise <= 0.5f) {
-                tile =  TILE_TYPE_GRASS;
+                tile = TILE_TYPE_GRASS;
             } else if (noise < 0.85f) {
                 tile = TILE_TYPE_FOREST;
             } else {
                 tile = TILE_TYPE_MOUNTAIN;
             }
 
-            game->world.tiles[TILE_INDEX(x,y)] = tile;
+            game->world.tiles[TILE_INDEX(x, y)] = tile;
         }
     }
 
     for (int i = 0; i < START_NPC_NUM_DEER; i++) {
-
         const size_t pos_tile_index = random_int_range(
             &game->random, 0, WORLD_SIZE * WORLD_SIZE
         );
 
         NPC* npc = &game->world.npcs[i];
-        *npc = (NPC){
+        *npc     = (NPC){
             .character = CHARACTER_TYPE_DEER,
         };
         world_pos_from_tile_index(pos_tile_index, &npc->pos_x, &npc->pos_y);
         npc_set_random_target_pos(&game->random, npc);
-        game->world.num_npcs +=1;
+        game->world.num_npcs += 1;
     }
-
 }
+
 void set_player_pos(Game* game, const i32 x, const i32 y) {
     game->player.pos_x = x;
     game->player.pos_y = y;
@@ -867,7 +869,7 @@ void set_player_pos(Game* game, const i32 x, const i32 y) {
 }
 
 void game_simulate(Game* game) {
-    for (int i =0; i < game->world.num_npcs; i++) {
+    for (int i = 0; i < game->world.num_npcs; i++) {
         NPC* npc = &game->world.npcs[i];
         if (npc->action_breaks > 0) {
             npc->action_breaks--;
@@ -893,32 +895,40 @@ void game_simulate(Game* game) {
         }
 
         if (random_float(&game->random) > 0.5f) {
-            npc->action_breaks +=  random_int_range(&game->random, 1,3);
+            npc->action_breaks += random_int_range(&game->random, 1, 3);
         }
 
         SDL_assert(is_in_world_bounds(npc->pos_x,npc->pos_y));
     }
 }
+
 void end_day(Game* game) {
     game->days++;
     game_simulate(game);
 }
+
+/* INPUT **********************************************************************/
 void input_move_north(Game* game) {
-    set_player_pos(game, game->player.pos_x, game->player.pos_y+1);
+    set_player_pos(game, game->player.pos_x, game->player.pos_y + 1);
     end_day(game);
 }
+
 void input_move_south(Game* game) {
-    set_player_pos(game, game->player.pos_x, game->player.pos_y-1);
+    set_player_pos(game, game->player.pos_x, game->player.pos_y - 1);
     end_day(game);
 }
+
 void input_move_east(Game* game) {
-    set_player_pos(game, game->player.pos_x+1, game->player.pos_y);
+    set_player_pos(game, game->player.pos_x + 1, game->player.pos_y);
     end_day(game);
 }
+
 void input_move_west(Game* game) {
-    set_player_pos(game, game->player.pos_x-1, game->player.pos_y);
+    set_player_pos(game, game->player.pos_x - 1, game->player.pos_y);
     end_day(game);
 }
+
+/* ACTIONS ********************************************************************/
 void action_chop_tree(Game* game) {
     SDL_assert(is_in_world_bounds(game->player.pos_x, game->player.pos_y));
     const size_t tile_index = game->player.pos_x + game->player.pos_y *
@@ -929,6 +939,7 @@ void action_chop_tree(Game* game) {
     game->wood++;
     end_day(game);
 }
+
 void action_campfire(Game* game) {
     end_day(game);
 }
@@ -937,8 +948,8 @@ void action_campfire(Game* game) {
 GAME_API bool game_init(
     CRLF_API* new_api, Game* game, UI_Context* ui, Game_Resource_IDs* res_ids
 ) {
-    api = new_api;
-    *game = default_game();
+    api    = new_api;
+    *game  = default_game();
     res_id = res_ids;
 #if !defined(__GAMELIB_STATIC_LINK__)
     ui_ctx = ui;
@@ -949,7 +960,7 @@ GAME_API bool game_init(
 
 GAME_API void game_tick(Game* game, float dt) {}
 
-GAME_API void game_draw(Game* game) {
+GAME_API void game_draw(const Game* game) {
     switch (game->state) {
     case GAME_STATE_MENU:
         draw_main_menu();
@@ -972,14 +983,10 @@ GAME_API void game_draw(Game* game) {
 GAME_API void game_cleanup(Game* game) {}
 
 GAME_API void game_ui_input(Game* game, const u32 id) {
-
     switch (game->state) {
     case GAME_STATE_MENU:
-        break;
     case GAME_STATE_NEW_GAME:
-        break;
     case GAME_STATE_SETTINGS:
-        break;
     case GAME_STATE_ABOUT_GAME:
         break;
     case GAME_STATE_GAMEPLAY:
@@ -997,12 +1004,16 @@ GAME_API void game_ui_input(Game* game, const u32 id) {
             action_campfire(game);
         break;
     }
+
+    //TODO: find compile time constant hash alternative for UI_ID
+    //(to be able to replace with switch and remove necessity to re-calculate
+    //hash every tick)
     if (id == UI_ID("New Game")) {
         generate_world(game);
-        game->state = GAME_STATE_GAMEPLAY;//GAME_STATE_NEW_GAME;
-    } else if (id == UI_ID("About")){
+        game->state = GAME_STATE_GAMEPLAY; //GAME_STATE_NEW_GAME;
+    } else if (id == UI_ID("About")) {
         game->state = GAME_STATE_ABOUT_GAME;
-    } else if (id == UI_ID("Settings")){
+    } else if (id == UI_ID("Settings")) {
         game->state = GAME_STATE_SETTINGS;
     } else if (id == UI_ID("Quit")) {
         game->quit_requested = true;
@@ -1012,47 +1023,52 @@ GAME_API void game_ui_input(Game* game, const u32 id) {
         SDL_OpenURL(
             "https://github.com/itsdanott/c-roguelike-framework/"
         );
-    } else if ( id == UI_ID("btn_author")) {
+    } else if (id == UI_ID("btn_author")) {
         SDL_OpenURL(
             "https://bsky.app/profile/itsdanott.bsky.social"
-            );
-    } else if ( id == UI_ID("stb")) {
+        );
+    } else if (id == UI_ID("stb")) {
         SDL_OpenURL(
             "https://github.com/nothings/stb"
         );
-    } else if ( id == UI_ID("sdl")) {
+    } else if (id == UI_ID("sdl")) {
         SDL_OpenURL(
             "https://github.com/libsdl-org/SDL/"
-            );
-    } else if ( id == UI_ID("emscripten")) {
+        );
+    } else if (id == UI_ID("emscripten")) {
         SDL_OpenURL(
             "https://emscripten.org/"
-            );
-    } else if ( id == UI_ID("fastnoise")) {
+        );
+    } else if (id == UI_ID("fastnoise")) {
         SDL_OpenURL(
             "https://github.com/Auburn/FastNoiseLite"
-            );
-    } else if ( id == UI_ID("born2bsporty")) {
+        );
+    } else if (id == UI_ID("born2bsporty")) {
         SDL_OpenURL(
             "https://www.pentacom.jp/pentacom/bitfontmaker2/gallery/?id=383"
         );
     }
 }
 
-
 GAME_API void game_keyboard_input(Game* game, SDL_KeyboardEvent event) {
     switch (event.key) {
-        default: return;
+    default: return;
     case SDLK_UP:
     case SDLK_W:
-        input_move_north(game); return;
+        input_move_north(game);
+        return;
     case SDLK_S:
-    case SDLK_DOWN: input_move_south(game); return;
+    case SDLK_DOWN: input_move_south(game);
+        return;
     case SDLK_A:
-    case SDLK_LEFT: input_move_west(game); return;
+    case SDLK_LEFT: input_move_west(game);
+        return;
     case SDLK_D:
-    case SDLK_RIGHT: input_move_east(game); return;
-    case SDLK_Q: action_campfire(game); return;
-    case SDLK_E: action_chop_tree(game); return;
+    case SDLK_RIGHT: input_move_east(game);
+        return;
+    case SDLK_Q: action_campfire(game);
+        return;
+    case SDLK_E: action_chop_tree(game);
+        return;
     }
 }
