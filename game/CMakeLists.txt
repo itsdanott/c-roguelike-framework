@@ -1,7 +1,9 @@
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(__DEBUG__)
     add_library(roguelike_game SHARED
             game.h
             game.c
+            ../third-party/FastNoiseLite/C/FastNoiseLite.h
     )
     set_target_properties(roguelike_game PROPERTIES
             OUTPUT_NAME "game"
@@ -12,6 +14,7 @@ else ()
     add_library(roguelike_game STATIC
             game.h
             game.c
+            ../third-party/FastNoiseLite/C/FastNoiseLite.h
     )
 endif ()
 

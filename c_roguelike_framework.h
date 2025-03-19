@@ -15,6 +15,11 @@ NOTE: Make sure to include SDL3 BEFORE including this header
 #ifndef C_ROGUELIKE_FRAMEWORK_H
 #define C_ROGUELIKE_FRAMEWORK_H
 
+#define CRLF_SORT_ORDER_MAX 128.f
+#define CRLF_SORT_ORDER_MIN (-CRLF_SORT_ORDER_MAX)
+
+#define CRLF_SORT_ORDER_CLAMPED(sort_order) SDL_clamp(sort_order, CRLF_SORT_ORDER_MIN, CRLF_SORT_ORDER_MAX)
+
 /* INTEGERS *******************************************************************/
 typedef Sint8 i8;
 typedef Sint16 i16;
@@ -41,6 +46,7 @@ static String make_string(const char* str) {
 #define STRING(str) make_string(str)
 
 /* MATH ***********************************************************************/
+#define CRLF_SIGN(x) (x > 0) ? 1 : ((x < 0) ? -1 : 0)
 #define VEC2_ZERO (vec2){0}
 #define VEC3_ZERO (vec3){0,0,0}
 #define VEC4_ZERO (vec4){0,0,0,0}
@@ -59,6 +65,7 @@ typedef struct {
 typedef struct {
     float x, y;
 } vec2;
+#define VEC2(x,y) (vec2){x,y}
 
 typedef struct {
     float x, y, z;
@@ -196,6 +203,7 @@ static u32 short_str_hash(String str) {
 #define COLOR_RED			(vec3){1.00f,0.00f,0.00f}
 #define COLOR_GREEN			(vec3){0.00f,1.00f,0.00f}
 #define COLOR_BLUE			(vec3){0.00f,0.00f,1.00f}
+#define COLOR_AQUA          (vec3){0.00f,1.00f,1.00f}
 #define COLOR_CYAN   		(vec3){0.00f,1.00f,1.00f}
 #define COLOR_TEAL          (vec3){0.00f,0.50f,0.50f}
 #define COLOR_YELLOW		(vec3){1.00f,1.00f,0.00f}
@@ -289,9 +297,6 @@ extern UI_Context* ui_ctx;
 #define UI_IMAGE(...) ui_image_element((UI_Image_Config)__VA_ARGS__ )
 
 #define UI_ANCHOR_CENTER (vec2){ .x = 0.5f, .y = 0.5f }
-//TODO: decide about these macros - they offer simpler writing but are error-prone (implic type casting etc)
-#define UI_POS(pos_x,pos_y) (vec2) { .x = pos_x, .y = pos_y }
-#define UI_SIZE(width,height) (vec2) { .x = width, .y = height }
 
 typedef enum {
     UI_ELEMENT_TYPE_NONE,
@@ -332,6 +337,7 @@ typedef struct {
     bool blocks_cursor;
     bool is_hidden;
     bool is_slice_center_hidden;
+    float sort_order_override;
 } UI_Container_Config;
 
 typedef struct {
@@ -493,6 +499,7 @@ struct UI_Context {
     UI_Render_Square square;
     UI_Context_Input input;
     UI_Context_Debug debug;
+    float time;
 };
 
 static void ui_element_start() {
@@ -556,6 +563,55 @@ static void ui_image_element(
     ui_ctx->temp_elem.config.image = config;
     ui_element_set_layout(config.layout);
     ui_element_end();
+}
+/* RANDOM *********************************************************************/
+// XorShift128+ implementation
+typedef struct {
+    u64 state[2];
+} Random;
+
+static u64 random_next(Random* state) {
+    uint64_t x = state->state[0];
+    uint64_t const y = state->state[1];
+    state->state[0] = y;
+    x ^= x << 23;
+    state->state[1] = x ^ y ^ (x >> 17) ^ (y >> 26);
+    return state->state[1] + y;
+}
+
+static void random_init(Random* state, const u64 seed) {
+    u64 z = seed;
+
+    // Apply the "splitmix64" algorithm to generate better distributed initial values
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    state->state[0] = z ^ (z >> 31);
+
+    z = (state->state[0] ^ (state->state[0] >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    state->state[1] = z ^ (z >> 31);
+
+    // Warm up the state with more iterations
+    for (int i = 0; i < 16; i++) {
+        random_next(state);
+    }
+}
+
+// Get a random float between 0 and 1
+static float random_float(Random* state) {
+    return (random_next(state) >> 11) * (1.0f / (float)(1ULL << 53));
+}
+
+// Get a random float in range [min, max]
+static float random_float_range(
+    Random* state, const float min, const float max
+) {
+    return min + (max - min) * random_float(state);
+}
+
+// Get a random integer in range [min, max]
+static i32 random_int_range(Random* state, const i32 min, const i32 max) {
+    return min + (i32)((max - min + 1) * random_float(state));
 }
 
 /* PUBLIC API ******************************************************************/

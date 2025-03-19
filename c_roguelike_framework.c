@@ -27,6 +27,14 @@ Lightweight C99 framework made for 7drl 2025.
 
 #include "game/game.h"
 
+/* CRLF CONFIG*****************************************************************/
+//use this define to make use of a dedicated game viewport (e.g. for 3d rendering)
+// #define CRLF_USE_GAMEVIEWPORT
+
+//use this define to add a scissor test to discard all stuff that is outside the
+//game's square viewport
+#define CRLF_USE_SQUARE_SCISSOR
+
 /* DEBUG DEFINES **************************************************************/
 #if !defined(__LEAK_DETECTION__)
 #define CRLF_malloc SDL_malloc
@@ -154,8 +162,6 @@ char TEMP_PATH[MAX_PATH_LEN];
 
 #define RECT_BUFFER_CAPACITY 2048
 #define RECT_VERTEX_BUFFER_CAPACITY (RECT_BUFFER_CAPACITY*6)
-#define RECT_MAX_SORT_ORDER 128.f
-#define RECT_MIN_SORT_ORDER (-RECT_MAX_SORT_ORDER)
 
 /* RENDERER *******************************************************************/
 typedef struct {
@@ -741,6 +747,7 @@ typedef struct {
     bool floating_point_precision;
 } Viewport;
 
+#if defined(CRLF_USE_GAMEVIEWPORT)
 Viewport default_viewport_game() {
     return (Viewport){
         .screen_pos = (vec2){256, 0},
@@ -751,10 +758,16 @@ Viewport default_viewport_game() {
         .floating_point_precision = false,
     };
 }
+#endif
 
 Viewport default_viewport_ui() {
     return (Viewport){
-        .clear_color = (vec4){0},
+        .clear_color =
+#if defined(CRLF_USE_GAMEVIEWPORT)
+         (vec4){0},//transparent
+#else
+         (vec4){0,0,0,1},
+#endif
         .frame_buffer_divisor = 1,
         .has_blending = true,
         .has_depth_buffer = true,
@@ -1794,12 +1807,12 @@ void ui_context_pos_size_pass(
     UI_Element* element = &ui_ctx->elements[index];
 
     const bool is_root = parent == NULL;
-    const vec2 parent_pos = is_root ? UI_POS(500, 500) : parent->_adjust_pos;
+    const vec2 parent_pos = is_root ? VEC2(500, 500) : parent->_adjust_pos;
     const vec2 parent_size = is_root
-                                 ? UI_SIZE(1000, 1000)
+                                 ? VEC2(1000, 1000)
                                  : parent->_adjusted_size;
 
-    element->_adjust_pos = UI_POS(
+    element->_adjust_pos = VEC2(
         parent_pos.x + float_lerp(-.5f, .5f, element->layout.anchor.x) *
         parent_size.x + element->layout.offset.x,
 
@@ -1808,13 +1821,13 @@ void ui_context_pos_size_pass(
     );
     element->_adjusted_size = element->layout.size;
 
-    element->_screen_pos = UI_POS(
+    element->_screen_pos = VEC2(
         ui_ctx->square.origin.x + element->_adjust_pos.x * ui_ctx->square.
         scale_fac,
         ui_ctx->square.origin.y + element->_adjust_pos.y * ui_ctx->square.
         scale_fac
     );
-    element->_screen_size = UI_SIZE(
+    element->_screen_size = VEC2(
         element->_adjusted_size.x * ui_ctx->square.scale_fac,
         element->_adjusted_size.y * ui_ctx->square.scale_fac
     );
@@ -1844,7 +1857,7 @@ void ui_context_pos_size_pass(
         *txt = get_text_dimension(
             element->config.text.text.chars, font, text_scale
         );
-        element->_screen_size = UI_SIZE(txt->width, txt->height);
+        element->_screen_size = VEC2(txt->width, txt->height);
 
 #if defined(UI_DEBUG_TEXT_ORIGIN)
         render_nine_slice(
@@ -1916,11 +1929,11 @@ void ui_context_input_pass_recursion(
     case UI_ELEMENT_TYPE_CONTAINER:
         if (element->config.container.blocks_cursor) {
             const UI_Box box = (UI_Box){
-                .min = UI_POS(
+                .min = VEC2(
                     element->_screen_pos.x - element->_screen_size.x * 0.5f,
                     element->_screen_pos.y - element->_screen_size.y * 0.5f
                 ),
-                .max = UI_POS(
+                .max = VEC2(
                     element->_screen_pos.x + element->_screen_size.x * 0.5f,
                     element->_screen_pos.y + element->_screen_size.y * 0.5f
                 )
@@ -1940,7 +1953,7 @@ void ui_context_input_pass_recursion(
     /* IMAGE ******************************************************************/
     case UI_ELEMENT_TYPE_IMAGE:
         if (element->config.image.blocks_cursor) {
-            vec2 min = UI_POS(
+            const vec2 min = VEC2(
                 element->_screen_pos.x - element->_screen_size.x * element->
                 config.image.pivot.x,
                 element->_screen_pos.y - element->_screen_size.y * element->
@@ -1948,7 +1961,7 @@ void ui_context_input_pass_recursion(
             );
             const UI_Box box = (UI_Box){
                 .min = min,
-                .max = UI_POS(
+                .max = VEC2(
                     min.x + element->_screen_size.x,
                     min.y + element->_screen_size.y
                 )
@@ -1984,11 +1997,15 @@ void ui_context_input_pass() {
 void ui_context_rect_render_pass(
     Rect_Buffer* rect_buffer,
     Resources* resources,
-    const size_t index
+    const size_t index,
+    const float sort_order_override
 ) {
     if (index >= ui_ctx->elem_count) return;
     UI_Element* element = &ui_ctx->elements[index];
-    const float sort_order = (float)element->depth;
+    const float sort_order = CRLF_SORT_ORDER_CLAMPED(
+        sort_order_override != 0 ? sort_order_override + (float)element->depth :
+        (float)element->depth
+    );
     switch (element->type) {
     default: SDL_assert(0);
         break;
@@ -2000,7 +2017,9 @@ void ui_context_rect_render_pass(
                 element->_screen_pos,
                 element->_screen_size,
                 element->config.container.bg_color,
-                (float)element->depth,
+                CRLF_SORT_ORDER_CLAMPED(
+                    sort_order + element->config.container.sort_order_override
+                ),
                 &resources->nine_slices[element->config.container.
                                                  nine_slice_id],
                 !element->config.container.is_slice_center_hidden
@@ -2008,7 +2027,9 @@ void ui_context_rect_render_pass(
         }
         for (size_t i = 0; i < element->child_count; i++) {
             ui_context_rect_render_pass(
-                rect_buffer, resources, element->first_child_index + i
+                rect_buffer, resources, element->first_child_index + i,
+                sort_order_override + element->config.container.
+                                               sort_order_override
             );
         }
         break;
@@ -2030,7 +2051,7 @@ void ui_context_rect_render_pass(
                 .pivot = {.0f, .25f},//For text we need 0.25 y-pivot
                 .size = size_converted,
                 .color = element->config.text.color,
-                .sort_order = (float)element->depth-0.1f,
+                .sort_order = sort_order-0.1f,
                 .texture_id = 3,
                 .tex_coords = default_rect_tex_coords()
         });
@@ -2040,7 +2061,7 @@ void ui_context_rect_render_pass(
             render_nine_slice(
                 rect_buffer,
                 vec2_add_vec2(
-                    element->_screen_pos, UI_SIZE(
+                    element->_screen_pos, VEC2(
                         txt->width *.5f,
                         - (txt->height * 0.5f - txt->font_height * 0.75f)
                     )
@@ -2112,7 +2133,7 @@ void ui_context_rect_render_pass(
                 .pivot = element->config.image.pivot,
                 .size = element->_screen_size,
                 .color = element->config.image.color,
-                .sort_order = (float)element->depth,
+                .sort_order = sort_order,
                 .texture_id = element->config.image.texture.id,
                 .tex_coords = tex_coords,
             }
@@ -2151,6 +2172,8 @@ typedef bool (*Game_Init_Func)(
 typedef void (*Game_Tick_Func)(Game*, float);
 typedef void (*Game_Draw_Func)(Game*);
 typedef void (*Game_Cleanup_Func)(Game*);
+typedef void (*Game_UI_Input_Func)(Game*, u32);
+typedef void (*Game_Keyboard_Input_Func)(Game*, SDL_KeyboardEvent);
 
 typedef struct {
     Path lib_path;
@@ -2161,6 +2184,8 @@ typedef struct {
     Game_Tick_Func game_tick;
     Game_Draw_Func game_draw;
     Game_Cleanup_Func game_cleanup;
+    Game_UI_Input_Func game_ui_input;
+    Game_Keyboard_Input_Func game_keyboard_input;
 } Hot_Reload;
 
 //This copies the game lib to the temp lib in order to support hot reloading
@@ -2228,6 +2253,8 @@ bool load_game_lib(
     LOAD_GAME_LIB_FUNC_PTR(game_tick, Game_Tick_Func)
     LOAD_GAME_LIB_FUNC_PTR(game_draw, Game_Draw_Func)
     LOAD_GAME_LIB_FUNC_PTR(game_cleanup, Game_Cleanup_Func)
+    LOAD_GAME_LIB_FUNC_PTR(game_ui_input, Game_UI_Input_Func)
+    LOAD_GAME_LIB_FUNC_PTR(game_keyboard_input, Game_Keyboard_Input_Func)
 
 #undef LOAD_GAME_LIB_FUNC_PTR
 
@@ -2348,20 +2375,22 @@ typedef struct {
     Game game;
     Mouse mouse;
     u64 last_tick;
-    Renderer test_renderer;
-    Shader_Program test_shader;
     Path asset_path;
+
     Renderer rect_renderer;
     Shader_Program rect_shader;
     Rect_Buffer rect_buffer;
     Rect_Vertex_Buffer rect_vertex_buffer;
+
+#if defined(CRLF_USE_GAMEVIEWPORT)
     Viewport viewport_game;
+#endif
     Viewport viewport_ui;
     Renderer viewport_renderer;
     Shader_Program viewport_shader;
+
     GL_Texture_Array texture_array;
     bool has_focus;
-    bool quit_requested;
     Game_Resource_IDs res_id;
     Resources resources;
     i32 num_tex_res;
@@ -2379,7 +2408,9 @@ void init_app_ptr(App* app) {
             .width = APP_WINDOW_WIDTH,
             .height = APP_WINDOW_HEIGHT,
         },
+#if defined(CRLF_USE_GAMEVIEWPORT)
         .viewport_game = default_viewport_game(),
+#endif
         .viewport_ui = default_viewport_ui(),
         .has_focus = false,
         .api = (CRLF_API){
@@ -2418,6 +2449,7 @@ static bool app_init(App* app) {
         texture_resource_default(
             "placeholder.png", &app->res_id.tex_placeholder
         ),
+        texture_resource_atlas("characters.png", 4, 4, &app->res_id.characters),
     };
 
     const i32 num_textures = sizeof(texture_resources) / sizeof(
@@ -2486,10 +2518,6 @@ static bool app_init(App* app) {
     SDL_memcpy(app->resources.nine_slices, &nine_slices[0], nine_slices_size);
 
     /* SHADER******************************************************************/
-
-    app->test_shader = compile_shader_program(
-        test_shader_vert, test_shader_frag
-    );
     app->rect_shader = compile_shader_program(
         rect_shader_vert, rect_shader_frag
     );
@@ -2498,35 +2526,39 @@ static bool app_init(App* app) {
     );
 
     viewport_renderer_init(&app->viewport_renderer);
+
+#if defined(CRLF_USE_GAMEVIEWPORT)
     viewport_generate(
         &app->viewport_game,
         (ivec2){app->window.width, app->window.height}
     );
+#endif
     viewport_generate(
         &app->viewport_ui,
         (ivec2){app->window.width, app->window.height}
     );
 
-    renderer_init(&app->test_renderer);
-    renderer_bind(&app->test_renderer);
-    const float vertices[] = {
-        // positions            // colors
-        0.0f, 0.5f, 0.5f, 1.0f, 0.0f, 0.0f,
-        0.5f, -0.5f, 0.5f, 0.0f, 1.0f, 0.0f,
-        -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f,
-    };
-
-    glBufferData(
-        GL_ARRAY_BUFFER, sizeof(float) * 18,
-        &vertices[0], GL_STATIC_DRAW
-    );
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT,GL_FALSE, 6 * sizeof(float), NULL);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(
-        1, 3, GL_FLOAT,GL_FALSE, 6 * sizeof(float),
-        (void*)(3 * sizeof(float))
-    );
+    // Hello Triangle Example:
+    // renderer_init(&app->test_renderer);
+    // renderer_bind(&app->test_renderer);
+    // const float vertices[] = {
+    //     // positions            // colors
+    //     0.0f, 0.5f, 0.5f, 1.0f, 0.0f, 0.0f,
+    //     0.5f, -0.5f, 0.5f, 0.0f, 1.0f, 0.0f,
+    //     -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f,
+    // };
+    //
+    // glBufferData(
+    //     GL_ARRAY_BUFFER, sizeof(float) * 18,
+    //     &vertices[0], GL_STATIC_DRAW
+    // );
+    // glEnableVertexAttribArray(0);
+    // glVertexAttribPointer(0, 3, GL_FLOAT,GL_FALSE, 6 * sizeof(float), NULL);
+    // glEnableVertexAttribArray(1);
+    // glVertexAttribPointer(
+    //     1, 3, GL_FLOAT,GL_FALSE, 6 * sizeof(float),
+    //     (void*)(3 * sizeof(float))
+    // );
 
     renderer_init(&app->rect_renderer);
     renderer_bind(&app->rect_renderer);
@@ -2572,23 +2604,26 @@ static void app_tick(App* app) {
 #else
     game_tick(&app->game, DELTA_TIME);
 #endif
+    ui_ctx->time += DELTA_TIME;
 }
 
 static void app_draw(App* app) {
-    /* GAME *******************************************************************/
+    /* GAME RENDER PASS *******************************************************/
+#if defined(CRLF_USE_GAMEVIEWPORT)
     viewport_bind(&app->viewport_game);
-
-    //Hello Triangle
-    glUseProgram(app->test_shader.id);
-    renderer_bind(&app->test_renderer);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    //E.g. Hello Triangle
+    // glUseProgram(app->test_shader.id);
+    // renderer_bind(&app->test_renderer);
+    // glDrawArrays(GL_TRIANGLES, 0, 3);
+#endif
 
     /* UI *********************************************************************/
     const float window_width = (float)app->window.width;
     const float window_height = (float)app->window.height;
     const float viewport_width = (float)app->viewport_ui.frame_buffer_size.x;
     const float viewport_height = (float)app->viewport_ui.frame_buffer_size.y;
-    const float square_size = SDL_min(viewport_width, viewport_height);
+    const int framebuffer_size_min = SDL_min(app->viewport_ui.frame_buffer_size.x, app->viewport_ui.frame_buffer_size.y);
+    const float square_size = (float)(framebuffer_size_min - (framebuffer_size_min % 2));
 
     const vec2 square_center = (vec2){
         viewport_width * 0.5f,
@@ -2610,6 +2645,13 @@ static void app_draw(App* app) {
             viewport_height,
         };
 
+#if defined(CRLF_USE_SQUARE_SCISSOR)
+    glEnable(GL_SCISSOR_TEST);
+    const int viewport_min = SDL_min(viewport_width, viewport_height);
+    const ivec2 viewport_center = (ivec2){(int)(viewport_width*0.5f), (int)(viewport_height*0.5f)};
+    glScissor(viewport_center.x - viewport_min/2, viewport_center.y - viewport_min/2, viewport_min, viewport_min);
+#endif
+
     viewport_bind(&app->viewport_ui);
     reset_rect_buffer(&app->rect_buffer);
 
@@ -2625,15 +2667,19 @@ static void app_draw(App* app) {
     ui_tree_reindex_depth_first_to_breadth_first();
     ui_context_pos_size_pass(&app->resources, 0, NULL);
     ui_context_input_pass();
-    ui_context_rect_render_pass(&app->rect_buffer, &app->resources, 0);
+    ui_context_rect_render_pass(&app->rect_buffer, &app->resources, 0, 0);
     ui_context_clear();
+
+#if defined(CRLF_USE_SQUARE_SCISSOR)
+    glDisable(GL_SCISSOR_TEST);
+#endif
 
     /* UI BOILERPLATE **********************************************************/
     build_rect_vertex_buffer(&app->rect_buffer, &app->rect_vertex_buffer);
     glUseProgram(app->rect_shader.id);
     const mat4 ortho_mat = mat4_ortho(
-        0.f, viewport_width, 0.f, viewport_height, RECT_MIN_SORT_ORDER,
-        RECT_MAX_SORT_ORDER
+        0.f, viewport_width, 0.f, viewport_height, CRLF_SORT_ORDER_MIN,
+        CRLF_SORT_ORDER_MAX
     );
     const i32 projection_loc = glGetUniformLocation(
         app->rect_shader.id, "projection"
@@ -2655,11 +2701,14 @@ static void app_draw(App* app) {
 
     /* SCREEN *****************************************************************/
     viewport_unbind(app->window.width, app->window.height);
+    glClear(GL_COLOR_BUFFER_BIT);
 
+#if defined(CRLF_USE_GAMEVIEWPORT)
     viewport_render_to_window(
         &app->viewport_game, &app->viewport_renderer,
         &app->viewport_shader
     );
+#endif
 
     viewport_render_to_window(
         &app->viewport_ui, &app->viewport_renderer,
@@ -2672,8 +2721,7 @@ static void app_draw(App* app) {
 static void app_cleanup(App* app) {
     resources_cleanup(&app->resources);
     texture_array_free(&app->texture_array);
-    delete_shader_program(&app->test_shader);
-    delete_shader_program(&app->test_shader);
+
     delete_shader_program(&app->rect_shader);
     delete_shader_program(&app->viewport_shader);
 
@@ -2682,9 +2730,10 @@ static void app_cleanup(App* app) {
 #endif
 
     ui_context_cleanup();
+#if defined(CRLF_USE_GAMEVIEWPORT)
     viewport_cleanup(&app->viewport_game);
+#endif
     viewport_cleanup(&app->viewport_ui);
-    renderer_cleanup(&app->test_renderer);
     renderer_cleanup(&app->rect_renderer);
     renderer_cleanup(&app->viewport_renderer);
     SDL_GL_DestroyContext(app->window.gl_context);
@@ -2700,7 +2749,6 @@ static void app_event_mouse_down(
     switch (event.button) {
     case SDL_BUTTON_LEFT:
         ui_ctx->input.down_id = ui_ctx->input.hover_id;
-        SDL_Log("ui_ctx->input.down_id = %u", ui_ctx->input.down_id);
         return;
 
     case SDL_BUTTON_RIGHT:
@@ -2718,22 +2766,16 @@ static void app_event_mouse_up(
     switch (event.button) {
     case SDL_BUTTON_LEFT:
         if (ui_ctx->input.down_id == 0) return;
-    //TODO: move input callbacks to game lib
+
         if (ui_ctx->input.down_id == ui_ctx->input.hover_id) {
             const u32 id = ui_ctx->input.down_id;
-            if (id == UI_ID("New Game")) {
-                log_msg("NEW GAME!");
-                app->game.is_main_menu = false;
-            } else if (id == UI_ID("Quit")) {
-                app->quit_requested = true;
-            } else if (id == UI_ID("back_id")) {
-                app->game.is_main_menu = true;
-            } else if (id == UI_ID("github")) {
-                SDL_OpenURL(
-                    "https://github.com/itsdanott/c-roguelike-framework/"
-                );
-            }
+#if defined(__DEBUG__)
+            app->hot_reload.game_ui_input(&app->game, id);
+#else
+            game_ui_input(&app->game, id);
+#endif
         }
+
         ui_ctx->input.down_id = 0;
         return;
 
@@ -2746,6 +2788,13 @@ static void app_event_mouse_up(
 }
 
 static void app_event_key_down(App* app, const SDL_KeyboardEvent event) {
+#if defined(__DEBUG__)
+    app->hot_reload.game_keyboard_input(&app->game, event);
+#else
+    game_keyboard_input(&app->game, event);
+#endif
+
+#if defined(__DEBUG__)
     switch (event.key) {
     case SDLK_SPACE:
         SDL_GetWindowFullscreenMode(app->window.sdl);
@@ -2764,7 +2813,8 @@ static void app_event_key_down(App* app, const SDL_KeyboardEvent event) {
             &app->viewport_ui, (ivec2){app->window.width, app->window.height}
         );
         return;
-    default: return;
+    default:
+#endif
     }
 }
 
@@ -2938,10 +2988,12 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
         );
         app->window.width = event->window.data1;
         app->window.height = event->window.data2;
+#if defined(CRLF_USE_GAMEVIEWPORT)
         viewport_generate(
             &app->viewport_game,
             (ivec2){app->window.width, app->window.height}
         );
+#endif
         viewport_generate(
             &app->viewport_ui,
             (ivec2){app->window.width, app->window.height}
@@ -2994,7 +3046,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
     }
 
 #if !defined(SDL_PLATFORM_EMSCRIPTEN)
-    if (app->quit_requested)
+    if (app->game.quit_requested)
         return SDL_APP_SUCCESS;
 #endif
 
