@@ -24,6 +24,7 @@ endif ()
 # EXECUTABLE *******************************************************************
 add_executable(c_roguelike_framework
         c_roguelike_framework.c
+
         c_roguelike_framework.h
         third-party/stb/stb_truetype.h
         third-party/stb/stb_image.h

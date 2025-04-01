@@ -665,7 +665,9 @@ bool check_shader_compilation(const u32 shader) {
 }
 
 Shader compile_shader(const char* source, const Shader_Type type) {
-    Shader shader         = {0};
+    Shader shader         = {
+        .type = type,
+    };
     GLenum gl_shader_type = 0;
     switch (type) {
     case SHADER_TYPE_VERTEX:
@@ -2927,6 +2929,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv) {
     //TODO: test if OPENGL_FORWARD_COMPAT is required for mac with sdl
 
     app->window.gl_context = SDL_GL_CreateContext(window);
+    SDL_GL_MakeCurrent(window, app->window.gl_context);
 
     if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
         SDL_LogError(0, "Failed to load OpenGL via Glad: %s", SDL_GetError());
