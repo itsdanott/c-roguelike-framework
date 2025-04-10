@@ -364,20 +364,12 @@ GL_Texture_Format gl_texture_get_format(
 #endif
     case 3:
         return (GL_Texture_Format){
-            .internal_format = gamma_correct ? GL_SRGB : GL_RGB,
+            .internal_format = gamma_correct ? GL_SRGB8 : GL_RGB,
             .format = GL_RGB,
         };
     case 4:
         return (GL_Texture_Format){
-            //BUG: GL_SRGB_ALPHA in combination with texImage3D causes a crash in web:
-            //INVALID_VALUE: texImage3D: invalid internalformat
-            //GL_INVALID_OPERATION: Level of detail outside of range.
-            //GL_INVALID_OPERATION: Texture format does not support mipmap generation.
-#if defined(SDL_PLATFORM_EMSCRIPTEN)
             .internal_format = gamma_correct ? GL_SRGB8_ALPHA8 : GL_RGBA,
-#else
-            .internal_format = gamma_correct ? GL_SRGB_ALPHA : GL_RGBA,
-#endif
             .format = GL_RGBA,
         };
     default:
